@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: bun-linux-x64
+            artifact: klix-linux-x64
+          - os: macos-latest
+            target: bun-darwin-x64
+            artifact: klix-macos-x64
+          - os: macos-latest
+            target: bun-darwin-arm64
+            artifact: klix-macos-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Sync version from tag
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' "s/\"version\": \".*\"/\"version\": \"${VERSION}\"/" package.json
+            sed -i '' "s/const VERSION = \".*\"/const VERSION = \"${VERSION}\"/" src/index.ts
+          else
+            sed -i "s/\"version\": \".*\"/\"version\": \"${VERSION}\"/" package.json
+            sed -i "s/const VERSION = \".*\"/const VERSION = \"${VERSION}\"/" src/index.ts
+          fi
+
+      - run: bun install
+
+      - run: bun build --compile --target=${{ matrix.target }} src/index.ts --outfile ${{ matrix.artifact }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            klix-linux-x64/klix-linux-x64
+            klix-macos-x64/klix-macos-x64
+            klix-macos-arm64/klix-macos-arm64
+          generate_release_notes: true
+
+      - name: Update version in source and README
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          sed -i "s|img.shields.io/badge/version-[^-]*-blue|img.shields.io/badge/version-${VERSION}-blue|" README.md
+          sed -i "s/\"version\": \".*\"/\"version\": \"${VERSION}\"/" package.json
+          sed -i "s/const VERSION = \".*\"/const VERSION = \"${VERSION}\"/" src/index.ts
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md package.json src/index.ts
+          git diff --staged --quiet || git commit -m "chore: bump version to v${VERSION}"
+          git push origin HEAD:master

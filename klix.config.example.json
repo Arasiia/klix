@@ -1,0 +1,62 @@
+{
+  "version": "1",
+  "name": "My Project",
+  "root": ".",
+  "output": ".codeindex",
+  "language": "typescript",
+  "include": [
+    "src/**/*.ts", "src/**/*.tsx",
+    "server/**/*.ts", "client/**/*.ts", "client/**/*.tsx",
+    "app/**/*.ts", "lib/**/*.ts", "utils/**/*.ts"
+  ],
+  "exclude": [
+    "**/node_modules/**", "**/dist/**", "**/build/**",
+    "**/.git/**", "**/*.gen.ts", "**/*.d.ts",
+    "**/migrations/**", "**/drizzle/**",
+    "**/__tests__/**", "**/*.test.ts", "**/*.spec.ts", "**/coverage/**"
+  ],
+  "indexers": {
+    "files": {
+      "enabled": true,
+      "rolePatterns": {
+        "route": ["*.routes.ts"],
+        "service": ["*.service.ts"],
+        "hook": ["hooks/use-*.ts"],
+        "api-client": ["*.api.ts"],
+        "db-schema": ["db/schema/*.ts"]
+      }
+    },
+    "routes": {
+      "enabled": true,
+      "framework": "elysia",
+      "apiPrefix": "/api",
+      "filePattern": "**/*.routes.ts"
+    },
+    "functions": {
+      "enabled": true,
+      "includeJsDoc": true,
+      "servicePattern": "**/*.service.ts",
+      "excludeTsx": true
+    },
+    "types": {
+      "enabled": true,
+      "filePatterns": ["**/*.api.ts", "**/*.types.ts", "**/*.store.ts"]
+    },
+    "dbSchema": {
+      "enabled": true,
+      "framework": "drizzle",
+      "filePattern": "server/src/db/schema/*.ts"
+    },
+    "hooks": {
+      "enabled": true,
+      "filePattern": "**/hooks/use-*.ts",
+      "framework": "tanstack-query"
+    }
+  },
+  "claude": {
+    "claudeMdPath": "CLAUDE.md",
+    "conventions": []
+  },
+  "splitThreshold": 150,
+  "maxSections": 20
+}
