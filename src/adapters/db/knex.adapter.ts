@@ -117,6 +117,9 @@ export const knexAdapter: DbAdapter = {
       droppedTables.push(dropMatch[1]);
     }
 
+    const alteredTablesMap = new Map<string, ColumnDef[]>();
+    const droppedColumns: { tableName: string; columnName: string }[] = [];
+
     for (const rawSql of extractRawSqlStrings(upBody)) {
       const createRaw = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:\w+\.)?(\w+)\s*\(/gi;
       let rawMatch: RegExpExecArray | null;
@@ -132,8 +135,39 @@ export const knexAdapter: DbAdapter = {
       while ((dropRawMatch = dropRaw.exec(rawSql)) !== null) {
         droppedTables.push(dropRawMatch[1]);
       }
+
+      // ALTER TABLE x ADD COLUMN col type [constraints]
+      const alterAddRe = /ALTER\s+TABLE\s+(?:\w+\.)?(\w+)\s+ADD\s+COLUMN\s+(\w+)\s+(\w+(?:\([^)]*\))?)((?:\s+[^;,]*)?)/gi;
+      let alterAddMatch: RegExpExecArray | null;
+      while ((alterAddMatch = alterAddRe.exec(rawSql)) !== null) {
+        const tableName = alterAddMatch[1];
+        const colName = alterAddMatch[2];
+        const colType = alterAddMatch[3].toLowerCase().replace(/\([^)]*\)/, "");
+        const constraints = alterAddMatch[4] ?? "";
+        const nullable = !/NOT\s+NULL/i.test(constraints);
+        const hasDefault = /DEFAULT/i.test(constraints);
+        const isFk = /REFERENCES/i.test(constraints);
+        let references: string | undefined;
+        if (isFk) {
+          const refMatch = constraints.match(/REFERENCES\s+(?:\w+\.)?(\w+)\s*\((\w+)\)/i);
+          if (refMatch) references = `${refMatch[1]}.${refMatch[2]}`;
+        }
+        const col: ColumnDef = { name: colName, type: colType, nullable, hasDefault, isPk: false, isFk, references };
+        const cols = alteredTablesMap.get(tableName) ?? [];
+        cols.push(col);
+        alteredTablesMap.set(tableName, cols);
+      }
+
+      // ALTER TABLE x DROP COLUMN [IF EXISTS] col
+      const alterDropRe = /ALTER\s+TABLE\s+(?:\w+\.)?(\w+)\s+DROP\s+COLUMN\s+(?:IF\s+EXISTS\s+)?(\w+)/gi;
+      let alterDropMatch: RegExpExecArray | null;
+      while ((alterDropMatch = alterDropRe.exec(rawSql)) !== null) {
+        droppedColumns.push({ tableName: alterDropMatch[1], columnName: alterDropMatch[2] });
+      }
     }
 
-    return { tables, enums: [], droppedTables };
+    const alteredTables = Array.from(alteredTablesMap.entries()).map(([tableName, columns]) => ({ tableName, columns }));
+
+    return { tables, enums: [], droppedTables, alteredTables, droppedColumns };
   },
 };

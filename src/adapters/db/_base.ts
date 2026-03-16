@@ -74,5 +74,11 @@ export interface DbAdapter {
    * @param content Contenu du fichier
    * @param filePath Chemin absolu du fichier
    */
-  extract(content: string, filePath: string): { tables: TableDef[]; enums: EnumDef[]; droppedTables?: string[] };
+  extract(content: string, filePath: string): {
+    tables: TableDef[];
+    enums: EnumDef[];
+    droppedTables?: string[];
+    alteredTables?: { tableName: string; columns: ColumnDef[] }[];
+    droppedColumns?: { tableName: string; columnName: string }[];
+  };
 }

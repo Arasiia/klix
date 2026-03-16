@@ -313,6 +313,84 @@ exports.up = function(knex) {
     expect(output).not.toContain("| `name");
   });
 
+  it("migration create puis ALTER ADD COLUMN → colonne présente", () => {
+    mkdirSync(join(tmpDir, "migrations"), { recursive: true });
+    writeFileSync(
+      join(tmpDir, "migrations", "20230101_create_users.ts"),
+      `
+exports.up = function(knex) {
+  return knex.schema.createTable('users', function(table) {
+    table.increments('id');
+    table.string('name');
+  });
+};
+`,
+    );
+    writeFileSync(
+      join(tmpDir, "migrations", "20230201_add_credits.ts"),
+      `
+exports.up = function(knex) {
+  return knex.raw('ALTER TABLE users ADD COLUMN credits INTEGER NOT NULL DEFAULT 0');
+};
+`,
+    );
+    const config = {
+      ...DEFAULT_CONFIG,
+      exclude: [],
+      indexers: {
+        ...DEFAULT_CONFIG.indexers,
+        dbSchema: {
+          enabled: true,
+          framework: "knex",
+          filePattern: "migrations/**/*.ts",
+        },
+      },
+    };
+    const output = runDbSchemaIndexer(tmpDir, config);
+    expect(output).toContain("### `users`");
+    expect(output).toContain("credits");
+  });
+
+  it("migration create puis ALTER DROP COLUMN → colonne absente", () => {
+    mkdirSync(join(tmpDir, "migrations"), { recursive: true });
+    writeFileSync(
+      join(tmpDir, "migrations", "20230101_create_users.ts"),
+      `
+exports.up = function(knex) {
+  return knex.schema.createTable('users', function(table) {
+    table.increments('id');
+    table.string('name');
+    table.boolean('is_active');
+  });
+};
+`,
+    );
+    writeFileSync(
+      join(tmpDir, "migrations", "20230202_drop_is_active.ts"),
+      `
+exports.up = function(knex) {
+  return knex.raw('ALTER TABLE users DROP COLUMN is_active');
+};
+`,
+    );
+    const config = {
+      ...DEFAULT_CONFIG,
+      exclude: [],
+      indexers: {
+        ...DEFAULT_CONFIG.indexers,
+        dbSchema: {
+          enabled: true,
+          framework: "knex",
+          filePattern: "migrations/**/*.ts",
+        },
+      },
+    };
+    const output = runDbSchemaIndexer(tmpDir, config);
+    expect(output).toContain("### `users`");
+    expect(output).not.toContain("is_active");
+    expect(output).toContain("name");
+  });
+
   it("Drizzle non affecté — tests existants passent toujours", () => {
     mkdirSync(join(tmpDir, "db", "schema"), { recursive: true });
     writeFileSync(

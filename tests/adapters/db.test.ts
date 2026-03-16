@@ -582,6 +582,72 @@ exports.up = async function(knex) {
   });
 });
 
+describe("knexAdapter — ALTER TABLE", () => {
+  it("parse ALTER TABLE ADD COLUMN depuis raw SQL (string simple)", () => {
+    const content = `
+      export async function up(knex) {
+        return knex.raw('ALTER TABLE users ADD COLUMN credits INTEGER NOT NULL DEFAULT 0')
+      }
+    `;
+    const { alteredTables } = knexAdapter.extract(content, FILE);
+    expect(alteredTables).toHaveLength(1);
+    expect(alteredTables![0].tableName).toBe("users");
+    expect(alteredTables![0].columns[0].name).toBe("credits");
+    expect(alteredTables![0].columns[0].nullable).toBe(false);
+    expect(alteredTables![0].columns[0].hasDefault).toBe(true);
+  });
+
+  it("parse ALTER TABLE DROP COLUMN depuis raw SQL", () => {
+    const content = `
+      export async function up(knex) {
+        return knex.raw('ALTER TABLE users DROP COLUMN is_active')
+      }
+    `;
+    const { droppedColumns } = knexAdapter.extract(content, FILE);
+    expect(droppedColumns).toHaveLength(1);
+    expect(droppedColumns![0].tableName).toBe("users");
+    expect(droppedColumns![0].columnName).toBe("is_active");
+  });
+
+  it("ne parse pas ALTER TABLE dans down()", () => {
+    const content = `
+      export async function up(knex) { return knex.raw('SELECT 1') }
+      export async function down(knex) {
+        return knex.raw('ALTER TABLE users DROP COLUMN credits')
+      }
+    `;
+    const { droppedColumns } = knexAdapter.extract(content, FILE);
+    expect(droppedColumns ?? []).toHaveLength(0);
+  });
+
+  it("parse plusieurs ALTER TABLE ADD COLUMN dans un template literal", () => {
+    const content = `
+      export async function up(knex) {
+        return knex.raw(\`
+          ALTER TABLE orders ADD COLUMN customer_id VARCHAR(255) NULL;
+          ALTER TABLE orders ADD COLUMN invoice_id VARCHAR(255) NULL;
+        \`)
+      }
+    `;
+    const { alteredTables } = knexAdapter.extract(content, FILE);
+    expect(alteredTables).toHaveLength(1);
+    expect(alteredTables![0].columns).toHaveLength(2);
+  });
+
+  it("retourne alteredTables/droppedColumns vides si aucun ALTER", () => {
+    const content = `
+      exports.up = function(knex) {
+        return knex.schema.createTable('users', function(table) {
+          table.increments('id');
+        });
+      };
+    `;
+    const { alteredTables, droppedColumns } = knexAdapter.extract(content, FILE);
+    expect(alteredTables ?? []).toHaveLength(0);
+    expect(droppedColumns ?? []).toHaveLength(0);
+  });
+});
+
 describe("extractUpBody", () => {
   it("extrait le corps de exports.up = function", () => {
     const content = `

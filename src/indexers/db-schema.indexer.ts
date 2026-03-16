@@ -32,7 +32,7 @@ function collectDbSchema(
   const adapter = findDbAdapter(framework);
   if (!adapter) return null;
 
-  const files = globFiles(rootDir, filePattern, config.exclude);
+  const files = globFiles(rootDir, filePattern);
   const allEnums: Array<EnumDef & { file: string }> = [];
 
   const tableMap = new Map<string, TableDef>();
@@ -44,7 +44,7 @@ function collectDbSchema(
     } catch {
       continue;
     }
-    const { tables, enums, droppedTables } = adapter.extract(content, filePath);
+    const { tables, enums, droppedTables, alteredTables, droppedColumns } = adapter.extract(content, filePath);
 
     // Drops avant creates : gère le pattern "drop old + create new" dans un même fichier
     if (droppedTables) {
@@ -54,6 +54,30 @@ function collectDbSchema(
     }
     for (const table of tables) {
       tableMap.set(table.name, table);
+    }
+
+    // Appliquer ALTER TABLE ADD COLUMN
+    if (alteredTables) {
+      for (const { tableName, columns } of alteredTables) {
+        const existing = tableMap.get(tableName);
+        if (existing) {
+          for (const col of columns) {
+            if (!existing.columns.some((c) => c.name === col.name)) {
+              existing.columns.push(col);
+            }
+          }
+        }
+      }
+    }
+
+    // Appliquer ALTER TABLE DROP COLUMN
+    if (droppedColumns) {
+      for (const { tableName, columnName } of droppedColumns) {
+        const existing = tableMap.get(tableName);
+        if (existing) {
+          existing.columns = existing.columns.filter((c) => c.name !== columnName);
+        }
+      }
     }
 
     // Attach file info to enums using the first table's file or derive from filePath
@@ -132,7 +156,7 @@ export function runDbSchemaIndexer(rootDir: string, config: KlixConfig): string 
   const adapter = findDbAdapter(framework);
 
   if (!adapter) {
-    console.warn(`[klix] dbSchema: framework inconnu "${framework}". Adaptateurs disponibles : drizzle`);
+    console.warn(`[klix] dbSchema: framework inconnu "${framework}". Adaptateurs disponibles : drizzle, knex, raw-sql`);
     return `# DB SCHEMA — ${config.name}\n\n> framework "${framework}" non supporté.\n`;
   }
 
