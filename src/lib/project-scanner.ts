@@ -1,10 +1,23 @@
 import { existsSync, readdirSync, statSync } from "fs";
 import { join, extname } from "path";
 import { detectDbFramework } from "../adapters";
+import {
+  readKnexfile,
+  parseKnexfileConfig,
+  readDrizzleConfig,
+  parseDrizzleConfig,
+  detectApiPrefixFromEntryFiles,
+} from "./config-parser";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
+
+export interface FrameworkHints {
+  isNextJs?: boolean;
+  isNuxt?: boolean;
+  isNestJs?: boolean;
+}
 
 export interface ProjectScan {
   language: "typescript" | "javascript";
@@ -16,6 +29,7 @@ export interface ProjectScan {
   types: { filePatterns?: string[] };
   dbSchema: { detected: boolean; filePattern?: string };
   hooks: { detected: boolean; filePattern?: string };
+  frameworkHints?: FrameworkHints;
 }
 
 /* ------------------------------------------------------------------ */
@@ -154,22 +168,38 @@ export function detectLanguage(cwd: string): { language: "typescript" | "javascr
 /**
  * Détecte les dossiers racines contenant du code source.
  *
- * Vérifie l'existence de `src/`, `app/`, `server/`, `client/`, `lib/`
- * et confirme qu'ils contiennent au moins un fichier source.
- * Si aucun dossier n'est trouvé → `["."]`.
+ * Primary : `src/`, `app/`, `server/`, `client/`, `lib/`
+ * Secondary : `pages/`, `components/`, `middleware/`, `utils/`, `helpers/`, `shared/`
+ *
+ * Si au moins un primary trouvé, les secondary existants sont aussi inclus.
+ * Si aucun primary, les secondary deviennent candidats principaux.
+ * Si rien → `["."]`.
  */
 export function detectSourceRoots(cwd: string): string[] {
-  const candidates = ["src", "app", "server", "client", "lib"];
-  const roots: string[] = [];
+  const primaryCandidates = ["src", "app", "server", "client", "lib"];
+  const secondaryCandidates = ["pages", "components", "middleware", "utils", "helpers", "shared"];
 
-  for (const dir of candidates) {
+  const primaryRoots: string[] = [];
+  for (const dir of primaryCandidates) {
     const full = join(cwd, dir);
     if (existsSync(full) && dirHasSourceFiles(full)) {
-      roots.push(dir);
+      primaryRoots.push(dir);
     }
   }
 
-  return roots.length > 0 ? roots : ["."];
+  const secondaryRoots: string[] = [];
+  for (const dir of secondaryCandidates) {
+    const full = join(cwd, dir);
+    if (existsSync(full) && dirHasSourceFiles(full)) {
+      secondaryRoots.push(dir);
+    }
+  }
+
+  if (primaryRoots.length > 0) {
+    return [...primaryRoots, ...secondaryRoots];
+  }
+
+  return secondaryRoots.length > 0 ? secondaryRoots : ["."];
 }
 
 /**
@@ -216,6 +246,25 @@ export function buildExcludePatterns(cwd: string, deps: Record<string, string>):
     "**/__tests__/**",
     "**/*.test.{ts,js}",
     "**/*.spec.{ts,js}",
+    // Framework build outputs
+    "**/.next/**",
+    "**/.nuxt/**",
+    "**/.output/**",
+    "**/.vercel/**",
+    "**/.turbo/**",
+    "**/.svelte-kit/**",
+    "**/.astro/**",
+    // Static assets
+    "**/public/**",
+    "**/static/**",
+    // Seeds & fixtures
+    "**/seed/**",
+    "**/seeds/**",
+    "**/fixtures/**",
+    // Prisma generated migrations
+    "**/prisma/migrations/**",
+    // Root-level config files (no **/ → matches only at root via walker)
+    "*.config.{ts,js,mjs,cjs}",
   ];
 
   if ("drizzle-orm" in deps) {
@@ -226,6 +275,15 @@ export function buildExcludePatterns(cwd: string, deps: Record<string, string>):
     patterns.push("**/migrations/**");
   }
 
+  // Knexfile seeds directory → exclude
+  const knexContent = readKnexfile(cwd);
+  if (knexContent) {
+    const { seedsDir } = parseKnexfileConfig(knexContent);
+    if (seedsDir && existsSync(join(cwd, seedsDir))) {
+      patterns.push(`**/${seedsDir}/**`);
+    }
+  }
+
   return patterns;
 }
 
@@ -233,10 +291,14 @@ export function buildExcludePatterns(cwd: string, deps: Record<string, string>):
  * Détecte où vivent les fichiers de routes dans le projet.
  *
  * Stratégies (par ordre de priorité) :
- * 1. Dossier routes/ dans un source root → glob récursif (couvre les sous-dossiers)
+ * 1. Dossier routes/ dans un source root → glob récursif
  * 2. Fichiers routes* au root → glob sur les fichiers route
  * 3. Dossier controllers/ → glob récursif
- * 4. Fallback → undefined (utiliser le defaultFilePattern de l'adapter)
+ * 4. Dossier api/ → glob récursif
+ * 5. Dossier endpoints/ → glob récursif
+ * 6. Fallback → undefined (utiliser le defaultFilePattern de l'adapter)
+ *
+ * Si aucun apiPrefix structurel, tente la détection depuis les fichiers d'entrée.
  */
 export function detectRouteFiles(
   cwd: string,
@@ -271,29 +333,91 @@ export function detectRouteFiles(
     if (existsSync(controllersDir) && statSync(controllersDir).isDirectory()) {
       return { detected: true, filePattern: `${prefix}controllers/**/*.${ext}`, apiPrefix: "/" };
     }
+
+    // Strategy 4: api/ directory
+    const apiDir = join(rootDir, "api");
+    if (existsSync(apiDir) && statSync(apiDir).isDirectory()) {
+      return { detected: true, filePattern: `${prefix}api/**/*.${ext}`, apiPrefix: "/" };
+    }
+
+    // Strategy 5: endpoints/ directory
+    const endpointsDir = join(rootDir, "endpoints");
+    if (existsSync(endpointsDir) && statSync(endpointsDir).isDirectory()) {
+      return { detected: true, filePattern: `${prefix}endpoints/**/*.${ext}`, apiPrefix: "/" };
+    }
   }
 
   return { detected: false };
 }
 
 /**
+ * Enrichit l'apiPrefix d'un résultat de détection de routes
+ * en parsant les fichiers d'entrée Express/Koa.
+ */
+export function enrichApiPrefix(
+  cwd: string,
+  roots: string[],
+  routes: { detected: boolean; filePattern?: string; apiPrefix?: string },
+): { detected: boolean; filePattern?: string; apiPrefix?: string } {
+  if (!routes.detected) return routes;
+
+  // Si apiPrefix déjà spécifique (pas "/"), on le garde
+  if (routes.apiPrefix && routes.apiPrefix !== "/") return routes;
+
+  const prefix = detectApiPrefixFromEntryFiles(cwd, roots);
+  if (prefix) {
+    return { ...routes, apiPrefix: prefix };
+  }
+
+  return routes;
+}
+
+/**
  * Détecte les fichiers de services.
  *
- * Cherche un dossier `{root}/services/` ou des fichiers `*.service.{ext}`.
+ * Cherche : `services/`, `middleware/`, `utils/`, `helpers/`,
+ * fichiers `*.service.{ext}`, et patterns NestJS.
  */
 export function detectServiceFiles(
   cwd: string,
   roots: string[],
   ext: string,
+  deps?: Record<string, string>,
 ): string | string[] | undefined {
+  const patterns: string[] = [];
+
   for (const root of roots) {
     const rootDir = root === "." ? cwd : join(cwd, root);
     const prefix = root === "." ? "" : `${root}/`;
 
     const servicesDir = join(rootDir, "services");
     if (existsSync(servicesDir) && statSync(servicesDir).isDirectory()) {
-      return `${prefix}services/**/*.${ext}`;
+      patterns.push(`${prefix}services/**/*.${ext}`);
     }
+
+    const middlewareDir = join(rootDir, "middleware");
+    if (existsSync(middlewareDir) && statSync(middlewareDir).isDirectory()) {
+      patterns.push(`${prefix}middleware/**/*.${ext}`);
+    }
+
+    const utilsDir = join(rootDir, "utils");
+    if (existsSync(utilsDir) && statSync(utilsDir).isDirectory()) {
+      patterns.push(`${prefix}utils/**/*.${ext}`);
+    }
+
+    const helpersDir = join(rootDir, "helpers");
+    if (existsSync(helpersDir) && statSync(helpersDir).isDirectory()) {
+      patterns.push(`${prefix}helpers/**/*.${ext}`);
+    }
+  }
+
+  // NestJS patterns
+  if (deps && "@nestjs/core" in deps) {
+    patterns.push(`**/*.service.${ext}`, `**/*.controller.${ext}`);
+  }
+
+  if (patterns.length > 0) {
+    return patterns.length === 1 ? patterns[0] : patterns;
   }
 
   // Check for *.service.{ext} files
@@ -346,9 +470,10 @@ export function detectTypeFiles(
  * Détecte les fichiers de schéma DB.
  *
  * Stratégies selon le framework :
- * - knex : cherche un dossier migrations/
- * - drizzle : cherche db/schema/ dans les source roots
+ * - knex : parse knexfile → fallback dirs → migrations/ structurel
+ * - drizzle : parse drizzle.config → db/schema/ structurel
  * - prisma : cherche prisma/schema.prisma
+ * - raw-sql : cherche migrations/ avec fichiers .sql
  */
 export function detectDbSchemaFiles(
   cwd: string,
@@ -357,10 +482,21 @@ export function detectDbSchemaFiles(
   ext: string,
 ): { detected: boolean; filePattern?: string } {
   if (dbFramework === "knex") {
+    // 1. Parse knexfile config
+    const knexContent = readKnexfile(cwd);
+    if (knexContent) {
+      const { migrationsDir } = parseKnexfileConfig(knexContent);
+      if (migrationsDir && existsSync(join(cwd, migrationsDir))) {
+        return { detected: true, filePattern: `${migrationsDir}/**/*.${ext}` };
+      }
+    }
+
+    // 2. Check root migrations/
     if (existsSync(join(cwd, "migrations"))) {
       return { detected: true, filePattern: `migrations/**/*.${ext}` };
     }
-    // Check inside source roots
+
+    // 3. Check inside source roots
     for (const root of roots) {
       const migrDir = root === "." ? join(cwd, "migrations") : join(cwd, root, "migrations");
       if (existsSync(migrDir)) {
@@ -368,9 +504,35 @@ export function detectDbSchemaFiles(
         return { detected: true, filePattern: `${prefix}migrations/**/*.${ext}` };
       }
     }
+
+    // 4. Fallback: common Knex migration directories
+    const knexFallbackDirs = ["db/migrations", "database/migrations", "src/db/migrations", "src/migrations"];
+    for (const dir of knexFallbackDirs) {
+      if (existsSync(join(cwd, dir))) {
+        return { detected: true, filePattern: `${dir}/**/*.${ext}` };
+      }
+    }
   }
 
   if (dbFramework === "drizzle") {
+    // 1. Parse drizzle.config
+    const drizzleContent = readDrizzleConfig(cwd);
+    if (drizzleContent) {
+      const { schemaPath } = parseDrizzleConfig(drizzleContent);
+      if (schemaPath) {
+        // schemaPath could be a file or directory
+        if (existsSync(join(cwd, schemaPath))) {
+          const stat = statSync(join(cwd, schemaPath));
+          if (stat.isDirectory()) {
+            return { detected: true, filePattern: `${schemaPath}/*.${ext}` };
+          }
+          // It's a file
+          return { detected: true, filePattern: schemaPath };
+        }
+      }
+    }
+
+    // 2. Structural detection in source roots
     for (const root of roots) {
       const rootDir = root === "." ? cwd : join(cwd, root);
       const prefix = root === "." ? "" : `${root}/`;
@@ -451,9 +613,28 @@ export function scanProject(cwd: string, deps: Record<string, string>): ProjectS
   const exclude = buildExcludePatterns(cwd, deps);
 
   const ext = extGlob(language, hasTsConfig);
-  const routes = detectRouteFiles(cwd, sourceRoots, ext);
-  const servicePattern = detectServiceFiles(cwd, sourceRoots, ext);
+  let routes = detectRouteFiles(cwd, sourceRoots, ext);
+  const servicePattern = detectServiceFiles(cwd, sourceRoots, ext, deps);
   const typePatterns = detectTypeFiles(cwd, sourceRoots, ext);
+
+  // Framework hints
+  const frameworkHints: FrameworkHints = {};
+  if ("next" in deps) frameworkHints.isNextJs = true;
+  if ("nuxt" in deps) frameworkHints.isNuxt = true;
+  if ("@nestjs/core" in deps) frameworkHints.isNestJs = true;
+
+  // Next.js API routes detection
+  if (frameworkHints.isNextJs && !routes.detected) {
+    // Check app/api/ or pages/api/
+    if (existsSync(join(cwd, "app", "api"))) {
+      routes = { detected: true, filePattern: `app/api/**/*.${ext}`, apiPrefix: "/api" };
+    } else if (existsSync(join(cwd, "pages", "api"))) {
+      routes = { detected: true, filePattern: `pages/api/**/*.${ext}`, apiPrefix: "/api" };
+    }
+  }
+
+  // Enrich apiPrefix from entry files (Express/Koa app.use())
+  routes = enrichApiPrefix(cwd, sourceRoots, routes);
 
   // Detect DB framework from deps (via adapter registry)
   let dbFramework = detectDbFramework(deps);
@@ -475,6 +656,8 @@ export function scanProject(cwd: string, deps: Record<string, string>): ProjectS
   const dbSchema = detectDbSchemaFiles(cwd, sourceRoots, dbFramework, ext);
   const hooks = detectHookFiles(cwd, sourceRoots);
 
+  const hasHints = frameworkHints.isNextJs || frameworkHints.isNuxt || frameworkHints.isNestJs;
+
   return {
     language,
     sourceRoots,
@@ -485,5 +668,6 @@ export function scanProject(cwd: string, deps: Record<string, string>): ProjectS
     types: { filePatterns: typePatterns },
     dbSchema,
     hooks,
+    ...(hasHints ? { frameworkHints } : {}),
   };
 }

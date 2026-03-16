@@ -8,6 +8,7 @@ import {
   buildIncludePatterns,
   buildExcludePatterns,
   detectRouteFiles,
+  enrichApiPrefix,
   detectServiceFiles,
   detectTypeFiles,
   detectDbSchemaFiles,
@@ -175,6 +176,25 @@ describe("detectSourceRoots", () => {
     writeFileSync(join(tmpDir, "src/readme.md"), "# Hello");
     expect(detectSourceRoots(tmpDir)).toEqual(["."]);
   });
+
+  it("primary + secondary roots → les deux inclus", () => {
+    touch(join(tmpDir, "src/index.ts"), "");
+    touch(join(tmpDir, "utils/helpers.ts"), "");
+    touch(join(tmpDir, "middleware/auth.ts"), "");
+    const roots = detectSourceRoots(tmpDir);
+    expect(roots).toContain("src");
+    expect(roots).toContain("utils");
+    expect(roots).toContain("middleware");
+  });
+
+  it("secondary seuls (pas de primary) → secondary comme roots", () => {
+    touch(join(tmpDir, "utils/helpers.ts"), "");
+    touch(join(tmpDir, "pages/index.ts"), "");
+    const roots = detectSourceRoots(tmpDir);
+    expect(roots).toContain("utils");
+    expect(roots).toContain("pages");
+    expect(roots).not.toContain(".");
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -230,6 +250,33 @@ describe("buildExcludePatterns", () => {
     mkdirSync(join(tmpDir, "migrations"), { recursive: true });
     const patterns = buildExcludePatterns(tmpDir, {});
     expect(patterns).toContain("**/migrations/**");
+  });
+
+  it("inclut les nouveaux patterns framework", () => {
+    const patterns = buildExcludePatterns(tmpDir, {});
+    expect(patterns).toContain("**/.next/**");
+    expect(patterns).toContain("**/.nuxt/**");
+    expect(patterns).toContain("**/.vercel/**");
+    expect(patterns).toContain("**/.turbo/**");
+    expect(patterns).toContain("**/.svelte-kit/**");
+    expect(patterns).toContain("**/.astro/**");
+    expect(patterns).toContain("**/public/**");
+    expect(patterns).toContain("**/static/**");
+    expect(patterns).toContain("**/seeds/**");
+    expect(patterns).toContain("**/seed/**");
+    expect(patterns).toContain("**/fixtures/**");
+    expect(patterns).toContain("**/prisma/migrations/**");
+    expect(patterns).toContain("*.config.{ts,js,mjs,cjs}");
+  });
+
+  it("exclut les seeds détectés depuis knexfile", () => {
+    writeFileSync(
+      join(tmpDir, "knexfile.ts"),
+      `module.exports = { seeds: { directory: './db/seeds' } };`,
+    );
+    mkdirSync(join(tmpDir, "db/seeds"), { recursive: true });
+    const patterns = buildExcludePatterns(tmpDir, {});
+    expect(patterns).toContain("**/db/seeds/**");
   });
 });
 
@@ -287,6 +334,34 @@ describe("detectRouteFiles", () => {
     const result = detectRouteFiles(tmpDir, ["src"], "{ts,tsx}");
     expect(result.apiPrefix).toBe("/");
   });
+
+  it("dossier src/api/ → src/api/**/*.{ts,tsx}", () => {
+    touch(join(tmpDir, "src/api/users.ts"), "");
+    const result = detectRouteFiles(tmpDir, ["src"], "{ts,tsx}");
+    expect(result.detected).toBe(true);
+    expect(result.filePattern).toBe("src/api/**/*.{ts,tsx}");
+  });
+
+  it("dossier src/endpoints/ → src/endpoints/**/*.{ts,tsx}", () => {
+    touch(join(tmpDir, "src/endpoints/users.ts"), "");
+    const result = detectRouteFiles(tmpDir, ["src"], "{ts,tsx}");
+    expect(result.detected).toBe(true);
+    expect(result.filePattern).toBe("src/endpoints/**/*.{ts,tsx}");
+  });
+
+  it("enrichApiPrefix détecte depuis app.use()", () => {
+    touch(join(tmpDir, "src/index.ts"), `const app = express();\napp.use('/api/v2', router);`);
+    const routes = { detected: true, filePattern: "src/routes/**/*.{ts,tsx}", apiPrefix: "/" };
+    const enriched = enrichApiPrefix(tmpDir, ["src"], routes);
+    expect(enriched.apiPrefix).toBe("/api/v2");
+  });
+
+  it("enrichApiPrefix garde le prefix existant si pas '/'", () => {
+    touch(join(tmpDir, "src/index.ts"), `app.use('/api/v2', router);`);
+    const routes = { detected: true, filePattern: "src/routes/**/*.{ts,tsx}", apiPrefix: "/api" };
+    const enriched = enrichApiPrefix(tmpDir, ["src"], routes);
+    expect(enriched.apiPrefix).toBe("/api");
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -311,6 +386,30 @@ describe("detectServiceFiles", () => {
     touch(join(tmpDir, "src/index.ts"), "");
     const result = detectServiceFiles(tmpDir, ["src"], "{ts,tsx}");
     expect(result).toBeUndefined();
+  });
+
+  it("middleware/ + utils/ → tableau de patterns", () => {
+    touch(join(tmpDir, "src/middleware/auth.ts"), "");
+    touch(join(tmpDir, "src/utils/format.ts"), "");
+    const result = detectServiceFiles(tmpDir, ["src"], "{ts,tsx}");
+    expect(Array.isArray(result)).toBe(true);
+    expect(result).toContain("src/middleware/**/*.{ts,tsx}");
+    expect(result).toContain("src/utils/**/*.{ts,tsx}");
+  });
+
+  it("helpers/ → inclus dans le pattern", () => {
+    touch(join(tmpDir, "src/helpers/date.ts"), "");
+    const result = detectServiceFiles(tmpDir, ["src"], "{ts,tsx}");
+    expect(result).toBe("src/helpers/**/*.{ts,tsx}");
+  });
+
+  it("NestJS → inclut *.service et *.controller", () => {
+    touch(join(tmpDir, "src/index.ts"), "");
+    const deps = { "@nestjs/core": "^10.0.0" };
+    const result = detectServiceFiles(tmpDir, ["src"], "{ts,tsx}", deps);
+    expect(Array.isArray(result)).toBe(true);
+    expect(result).toContain("**/*.service.{ts,tsx}");
+    expect(result).toContain("**/*.controller.{ts,tsx}");
   });
 });
 
@@ -373,6 +472,53 @@ describe("detectDbSchemaFiles", () => {
   it("framework none → detected: false", () => {
     const result = detectDbSchemaFiles(tmpDir, ["src"], "none", "{ts,tsx}");
     expect(result.detected).toBe(false);
+  });
+
+  it("knex avec knexfile.ts → détecte le bon chemin", () => {
+    writeFileSync(
+      join(tmpDir, "knexfile.ts"),
+      `module.exports = { migrations: { directory: './db/migrations' } };`,
+    );
+    mkdirSync(join(tmpDir, "db/migrations"), { recursive: true });
+    const result = detectDbSchemaFiles(tmpDir, ["src"], "knex", "{ts,tsx}");
+    expect(result.detected).toBe(true);
+    expect(result.filePattern).toBe("db/migrations/**/*.{ts,tsx}");
+  });
+
+  it("knex fallback dirs (db/migrations)", () => {
+    mkdirSync(join(tmpDir, "db/migrations"), { recursive: true });
+    const result = detectDbSchemaFiles(tmpDir, ["src"], "knex", "{ts,tsx}");
+    expect(result.detected).toBe(true);
+    expect(result.filePattern).toBe("db/migrations/**/*.{ts,tsx}");
+  });
+
+  it("knex fallback dirs (database/migrations)", () => {
+    mkdirSync(join(tmpDir, "database/migrations"), { recursive: true });
+    const result = detectDbSchemaFiles(tmpDir, ["src"], "knex", "{ts,tsx}");
+    expect(result.detected).toBe(true);
+    expect(result.filePattern).toBe("database/migrations/**/*.{ts,tsx}");
+  });
+
+  it("drizzle avec drizzle.config.ts → détecte le schema path", () => {
+    writeFileSync(
+      join(tmpDir, "drizzle.config.ts"),
+      `export default defineConfig({ schema: './src/db/schema' });`,
+    );
+    mkdirSync(join(tmpDir, "src/db/schema"), { recursive: true });
+    const result = detectDbSchemaFiles(tmpDir, ["src"], "drizzle", "{ts,tsx}");
+    expect(result.detected).toBe(true);
+    expect(result.filePattern).toBe("src/db/schema/*.{ts,tsx}");
+  });
+
+  it("drizzle avec drizzle.config.ts (fichier unique)", () => {
+    writeFileSync(
+      join(tmpDir, "drizzle.config.ts"),
+      `export default defineConfig({ schema: './src/schema.ts' });`,
+    );
+    touch(join(tmpDir, "src/schema.ts"), "");
+    const result = detectDbSchemaFiles(tmpDir, ["src"], "drizzle", "{ts,tsx}");
+    expect(result.detected).toBe(true);
+    expect(result.filePattern).toBe("src/schema.ts");
   });
 });
 
@@ -467,6 +613,40 @@ describe("scanProject — projet Koa+TS avec routes imbriquées", () => {
     expect(scan.routes.detected).toBe(true);
     expect(scan.routes.filePattern).toBe("app/routes/**/*.{ts,tsx}");
     expect(scan.dbSchema.detected).toBe(false);
+  });
+});
+
+describe("scanProject — framework hints", () => {
+  it("Next.js détecté → frameworkHints.isNextJs + routes app/api/", () => {
+    writePkg({ next: "^14.0.0", react: "^18.0.0" });
+    touch(join(tmpDir, "tsconfig.json"), "{}");
+    touch(join(tmpDir, "app/api/users/route.ts"), "");
+    touch(join(tmpDir, "app/page.tsx"), "");
+
+    const scan = scanProject(tmpDir, { next: "^14.0.0", react: "^18.0.0" });
+    expect(scan.frameworkHints?.isNextJs).toBe(true);
+    expect(scan.routes.detected).toBe(true);
+    expect(scan.routes.filePattern).toContain("app/api/");
+  });
+
+  it("NestJS détecté → frameworkHints.isNestJs + patterns NestJS", () => {
+    writePkg({ "@nestjs/core": "^10.0.0", express: "^4.18.0" });
+    touch(join(tmpDir, "tsconfig.json"), "{}");
+    touch(join(tmpDir, "src/index.ts"), "");
+
+    const scan = scanProject(tmpDir, { "@nestjs/core": "^10.0.0", express: "^4.18.0" });
+    expect(scan.frameworkHints?.isNestJs).toBe(true);
+    const sp = scan.functions.servicePattern;
+    expect(Array.isArray(sp)).toBe(true);
+    if (Array.isArray(sp)) {
+      expect(sp).toContain("**/*.service.{ts,tsx}");
+      expect(sp).toContain("**/*.controller.{ts,tsx}");
+    }
+  });
+
+  it("pas de framework → pas de frameworkHints", () => {
+    const scan = scanProject(tmpDir, {});
+    expect(scan.frameworkHints).toBeUndefined();
   });
 });
 

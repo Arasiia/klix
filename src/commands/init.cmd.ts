@@ -62,6 +62,14 @@ export async function cmdInit(cwd: string) {
   const dbEnabled = dbSchema !== "none" || scan.dbSchema.detected;
   const hooksEnabled = hooks !== "none" || scan.hooks.detected;
 
+  // NestJS: include controllers in service pattern if not already
+  if (scan.frameworkHints?.isNestJs && scan.functions.servicePattern) {
+    const sp = scan.functions.servicePattern;
+    if (Array.isArray(sp) && !sp.some((p) => p.includes(".controller."))) {
+      sp.push("**/*.controller.{ts,tsx}");
+    }
+  }
+
   const config = {
     version: "1",
     name: projectName,
@@ -133,6 +141,13 @@ export async function cmdInit(cwd: string) {
   console.log(`  Routes (${routes.padEnd(8)}) : ${routeEnabled ? (scan.routes.filePattern ?? routeAdapter?.defaultFilePattern ?? "défaut") : "désactivé"}`);
   console.log(`  DB     (${(dbSchema !== "none" ? dbSchema : "-").padEnd(8)}) : ${dbEnabled ? (scan.dbSchema.filePattern ?? "défaut") : "désactivé"}`);
   console.log(`  Hooks  (${(hooks !== "none" ? hooks : "-").padEnd(8)}) : ${hooksEnabled ? (scan.hooks.filePattern ?? "défaut") : "désactivé"}`);
+  if (scan.frameworkHints) {
+    const hints: string[] = [];
+    if (scan.frameworkHints.isNextJs) hints.push("Next.js");
+    if (scan.frameworkHints.isNuxt) hints.push("Nuxt");
+    if (scan.frameworkHints.isNestJs) hints.push("NestJS");
+    if (hints.length > 0) console.log(`  Frameworks      : ${hints.join(", ")}`);
+  }
   if (workspaces.length > 0) {
     console.log(`  Workspaces détectés : ${workspaces.join(", ")}`);
   }
