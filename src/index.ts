@@ -5,7 +5,7 @@ import { cmdInit } from "./commands/init.cmd";
 import { cmdClaudeMd } from "./commands/claude-md.cmd";
 import { cmdUpgrade } from "./commands/upgrade.cmd";
 
-const VERSION = "0.1.4";
+const VERSION = "0.1.5";
 
 function printHelp() {
   console.log(`
