@@ -71,7 +71,8 @@ export const drizzleAdapter: DbAdapter = {
     }
 
     // Extract tables using bracket-counting
-    const tableHeader = /export\s+const\s+(\w+)\s*=\s*pgTable\(["']([^"']+)["']/g;
+    // \s* entre pgTable( et le nom tolère les sauts de ligne (ex: pgTable(\n  "name",)
+    const tableHeader = /export\s+const\s+(\w+)\s*=\s*pgTable\(\s*["']([^"']+)["']/g;
     while ((match = tableHeader.exec(content)) !== null) {
       const varName = match[1];
       const tableName = match[2];

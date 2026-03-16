@@ -499,7 +499,7 @@ describe("detectDbSchemaFiles", () => {
     expect(result.filePattern).toBe("database/migrations/**/*.{ts,tsx}");
   });
 
-  it("drizzle avec drizzle.config.ts → détecte le schema path", () => {
+  it("drizzle avec drizzle.config.ts → détecte le schema path (répertoire → glob récursif)", () => {
     writeFileSync(
       join(tmpDir, "drizzle.config.ts"),
       `export default defineConfig({ schema: './src/db/schema' });`,
@@ -507,7 +507,8 @@ describe("detectDbSchemaFiles", () => {
     mkdirSync(join(tmpDir, "src/db/schema"), { recursive: true });
     const result = detectDbSchemaFiles(tmpDir, ["src"], "drizzle", "{ts,tsx}");
     expect(result.detected).toBe(true);
-    expect(result.filePattern).toBe("src/db/schema/*.{ts,tsx}");
+    // Les répertoires utilisent /**/*.ext pour trouver les fichiers imbriqués
+    expect(result.filePattern).toBe("src/db/schema/**/*.{ts,tsx}");
   });
 
   it("drizzle avec drizzle.config.ts (fichier unique)", () => {
@@ -519,6 +520,43 @@ describe("detectDbSchemaFiles", () => {
     const result = detectDbSchemaFiles(tmpDir, ["src"], "drizzle", "{ts,tsx}");
     expect(result.detected).toBe(true);
     expect(result.filePattern).toBe("src/schema.ts");
+  });
+
+  it("drizzle avec drizzle.config.ts pointant vers index.ts (barrel) → répertoire parent /**/*.ext", () => {
+    writeFileSync(
+      join(tmpDir, "drizzle.config.ts"),
+      `export default defineConfig({ schema: './src/db/schema/index.ts' });`,
+    );
+    touch(join(tmpDir, "src/db/schema/index.ts"), `export * from './users';\nexport * from './posts';`);
+    touch(join(tmpDir, "src/db/schema/users.ts"), "");
+    const result = detectDbSchemaFiles(tmpDir, ["src"], "drizzle", "{ts,tsx}");
+    expect(result.detected).toBe(true);
+    expect(result.filePattern).toBe("src/db/schema/**/*.{ts,tsx}");
+    expect(result.filePattern).not.toBe("src/db/schema/index.ts");
+  });
+
+  it("drizzle avec drizzle.config.ts pointant vers index.js (barrel JS) → répertoire parent /**/*.ext", () => {
+    writeFileSync(
+      join(tmpDir, "drizzle.config.ts"),
+      `export default defineConfig({ schema: './src/db/schema/index.js' });`,
+    );
+    touch(join(tmpDir, "src/db/schema/index.js"), `module.exports = require('./users');`);
+    const result = detectDbSchemaFiles(tmpDir, ["src"], "drizzle", "{js,jsx}");
+    expect(result.detected).toBe(true);
+    expect(result.filePattern).toBe("src/db/schema/**/*.{js,jsx}");
+  });
+
+  it("drizzle avec répertoire dans drizzle.config.ts → glob récursif", () => {
+    writeFileSync(
+      join(tmpDir, "drizzle.config.ts"),
+      `export default defineConfig({ schema: './src/db/schema' });`,
+    );
+    mkdirSync(join(tmpDir, "src/db/schema"), { recursive: true });
+    touch(join(tmpDir, "src/db/schema/users.ts"), "");
+    const result = detectDbSchemaFiles(tmpDir, ["src"], "drizzle", "{ts,tsx}");
+    expect(result.detected).toBe(true);
+    // Les répertoires utilisent maintenant /**/*.ext
+    expect(result.filePattern).toBe("src/db/schema/**/*.{ts,tsx}");
   });
 });
 

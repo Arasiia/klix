@@ -50,6 +50,21 @@ describe("elysiaAdapter", () => {
     expect(elysiaAdapter.extract("const x = 1;", FILE, PREFIX)).toHaveLength(0);
   });
 
+  it("pas de double slash quand apiPrefix='/' et routePrefix='/accounts'", () => {
+    const content = `const app = new Elysia({ prefix: '/accounts' })\n  .get('/', h)\n  .get('/:id', h)`;
+    const routes = elysiaAdapter.extract(content, FILE, "/");
+    expect(routes.every((r) => !r.path.includes("//"))).toBe(true);
+    expect(routes.some((r) => r.path === "/accounts/")).toBe(true);
+    expect(routes.some((r) => r.path === "/accounts/:id")).toBe(true);
+  });
+
+  it("apiPrefix '/api' + routePrefix '/users' → /api/users/... sans double slash", () => {
+    const content = `const app = new Elysia({ prefix: '/users' })\n  .get('/', h)\n  .post('/', h)`;
+    const routes = elysiaAdapter.extract(content, FILE, "/api");
+    expect(routes.every((r) => !r.path.includes("//"))).toBe(true);
+    expect(routes.some((r) => r.path === "/api/users/")).toBe(true);
+  });
+
   it("extrait PUT et PATCH", () => {
     const content = `.put('/users/:id', h)\n.patch('/users/:id', h)`;
     const routes = elysiaAdapter.extract(content, FILE, PREFIX);

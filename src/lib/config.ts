@@ -24,6 +24,7 @@ export interface KlixConfig {
   };
   splitThreshold?: number;
   maxSections?: number;
+  domainDepth?: number;
   workspaces?: string[];
 }
 

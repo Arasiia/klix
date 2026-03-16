@@ -465,7 +465,7 @@ export function runFunctionsIndexerGrouped(rootDir: string, config: KlixConfig):
   const allFunctions = collectFunctions(rootDir, config);
   const byDomain = new Map<string, FunctionEntry[]>();
   for (const fn of allFunctions) {
-    const domain = extractDomain(fn.file);
+    const domain = extractDomain(fn.file, config.domainDepth ?? 1);
     if (!byDomain.has(domain)) byDomain.set(domain, []);
     byDomain.get(domain)!.push(fn);
   }

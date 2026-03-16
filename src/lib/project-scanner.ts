@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, statSync } from "fs";
-import { join, extname } from "path";
+import { join, extname, basename } from "path";
 import { detectDbFramework } from "../adapters";
 import {
   readKnexfile,
@@ -524,9 +524,17 @@ export function detectDbSchemaFiles(
         if (existsSync(join(cwd, schemaPath))) {
           const stat = statSync(join(cwd, schemaPath));
           if (stat.isDirectory()) {
-            return { detected: true, filePattern: `${schemaPath}/*.${ext}` };
+            return { detected: true, filePattern: `${schemaPath}/**/*.${ext}` };
           }
-          // It's a file
+          // It's a file — si c'est un barrel (index.ts/js), utiliser le répertoire parent
+          const BARREL_NAMES = new Set(["index.ts", "index.js", "index.tsx", "index.jsx"]);
+          if (BARREL_NAMES.has(basename(schemaPath))) {
+            const lastSlash = schemaPath.lastIndexOf("/");
+            if (lastSlash > 0) {
+              const parentDir = schemaPath.substring(0, lastSlash);
+              return { detected: true, filePattern: `${parentDir}/**/*.${ext}` };
+            }
+          }
           return { detected: true, filePattern: schemaPath };
         }
       }

@@ -2,33 +2,96 @@ import { existsSync, writeFileSync, readFileSync, readdirSync, statSync } from "
 import { join, basename } from "path";
 import { detectFramework } from "../lib/config";
 import { findRouteAdapter, findDbAdapter, findHooksAdapter } from "../adapters";
-import { loadDepsFromPackageJson } from "../lib/stack-detector";
+import { loadDepsFromPackageJson, isFrontendOnlyProject } from "../lib/stack-detector";
 import { scanProject } from "../lib/project-scanner";
 
-function detectWorkspaces(cwd: string): string[] {
+/**
+ * Résout un pattern de workspace (avec ou sans glob `*`).
+ * - Sans glob : vérifie l'existence du dossier
+ * - Avec glob `dir/*` : lit le contenu de `dir/` et filtre par package.json
+ */
+function resolveWorkspacePattern(cwd: string, pattern: string): string[] {
+  if (!pattern.includes("*")) {
+    return existsSync(join(cwd, pattern)) ? [pattern] : [];
+  }
+  // Supporte uniquement `dir/*` (un seul niveau de glob)
+  const slashIdx = pattern.indexOf("/*");
+  if (slashIdx === -1) return [];
+  const baseDir = pattern.substring(0, slashIdx);
+  const basePath = join(cwd, baseDir);
+  if (!existsSync(basePath)) return [];
+  try {
+    return readdirSync(basePath)
+      .filter((name) => {
+        const full = join(basePath, name);
+        return statSync(full).isDirectory() && existsSync(join(full, "package.json"));
+      })
+      .map((name) => `${baseDir}/${name}`);
+  } catch {
+    return [];
+  }
+}
+
+export function detectWorkspaces(cwd: string): string[] {
   const pkgPath = join(cwd, "package.json");
   if (existsSync(pkgPath)) {
     try {
       const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-      if (Array.isArray(pkg.workspaces) && pkg.workspaces.every((w: any) => typeof w === "string" && !w.includes("*"))) {
-        return pkg.workspaces.filter((w: string) => existsSync(join(cwd, w)));
+      const rawWorkspaces: string[] = Array.isArray(pkg.workspaces) ? pkg.workspaces : [];
+      if (rawWorkspaces.length > 0) {
+        const resolved: string[] = [];
+        for (const w of rawWorkspaces) {
+          if (typeof w !== "string") continue;
+          resolved.push(...resolveWorkspacePattern(cwd, w));
+        }
+        return resolved;
       }
     } catch {}
   }
 
-  const packagesDir = join(cwd, "packages");
-  if (existsSync(packagesDir)) {
+  // Fallback : scanner packages/ si pas de workspaces déclarés
+  return resolveWorkspacePattern(cwd, "packages/*");
+}
+
+/**
+ * Détecte si le projet a une structure de dossiers profonde (3+ niveaux).
+ * Retourne 2 si on trouve des sous-sous-dossiers dans les sourceRoots, sinon 1.
+ */
+export function detectDomainDepth(cwd: string, sourceRoots: string[]): number {
+  const prefixes = ["server/src", "client/src", "src", "server", "client", "app", "lib", "utils"];
+
+  for (const root of sourceRoots) {
+    // Trouver la partie du root après le préfixe connu
+    let effectiveRoot = root;
+    for (const p of prefixes) {
+      if (root === p || root.startsWith(p + "/")) {
+        effectiveRoot = root;
+        break;
+      }
+    }
+
+    const rootPath = join(cwd, effectiveRoot);
+    if (!existsSync(rootPath)) continue;
+
     try {
-      return readdirSync(packagesDir)
-        .filter((name) => {
-          const subPkg = join(packagesDir, name, "package.json");
-          return statSync(join(packagesDir, name)).isDirectory() && existsSync(subPkg);
-        })
-        .map((name) => `packages/${name}`);
-    } catch {}
+      const firstLevel = readdirSync(rootPath);
+      for (const item of firstLevel) {
+        const itemPath = join(rootPath, item);
+        try {
+          if (!statSync(itemPath).isDirectory()) continue;
+          const secondLevel = readdirSync(itemPath);
+          for (const subItem of secondLevel) {
+            const subPath = join(itemPath, subItem);
+            try {
+              if (statSync(subPath).isDirectory()) return 2;
+            } catch { continue; }
+          }
+        } catch { continue; }
+      }
+    } catch { continue; }
   }
 
-  return [];
+  return 1;
 }
 
 export async function cmdInit(cwd: string) {
@@ -53,12 +116,14 @@ export async function cmdInit(cwd: string) {
   const workspaces = detectWorkspaces(cwd);
   const deps = loadDepsFromPackageJson(cwd);
   const scan = scanProject(cwd, deps);
+  const domainDepth = detectDomainDepth(cwd, scan.sourceRoots);
 
   const routeAdapter = findRouteAdapter(routes);
   const dbAdapter = findDbAdapter(dbSchema);
   const hooksAdapter = findHooksAdapter(hooks);
 
-  const routeEnabled = routes !== "none" || scan.routes.detected;
+  const isFrontendOnly = isFrontendOnlyProject(deps);
+  const routeEnabled = !isFrontendOnly && (routes !== "none" || scan.routes.detected);
   const dbEnabled = dbSchema !== "none" || scan.dbSchema.detected;
   const hooksEnabled = hooks !== "none" || scan.hooks.detected;
 
@@ -89,9 +154,7 @@ export async function cmdInit(cwd: string) {
           }
         : {
             enabled: false,
-            framework: routes !== "none" ? routes : "express",
-            apiPrefix: "/",
-            filePattern: routeAdapter?.defaultFilePattern ?? "**/*.routes.ts",
+            ...(routes !== "none" ? { framework: routes } : {}),
           },
       functions: {
         enabled: true,
@@ -130,6 +193,7 @@ export async function cmdInit(cwd: string) {
       claudeMdPath: "CLAUDE.md",
       conventions: [],
     },
+    ...(domainDepth > 1 ? { domainDepth } : {}),
     ...(workspaces.length > 0 ? { workspaces } : {}),
   };
 

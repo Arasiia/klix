@@ -79,10 +79,10 @@ export function runDbSchemaIndexerGrouped(rootDir: string, config: KlixConfig): 
   };
 
   for (const table of allTables) {
-    ensure(extractDomain(table.file)).tables.push(table);
+    ensure(extractDomain(table.file, config.domainDepth ?? 1)).tables.push(table);
   }
   for (const e of allEnums) {
-    ensure(extractDomain(e.file)).enums.push(e);
+    ensure(extractDomain(e.file, config.domainDepth ?? 1)).enums.push(e);
   }
 
   return byDomain;

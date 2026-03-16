@@ -111,6 +111,61 @@ export const posts = pgTable('posts', {
     expect(tables).toHaveLength(0);
     expect(enums).toHaveLength(0);
   });
+
+  it("extrait une table définie sur plusieurs lignes (nom après saut de ligne)", () => {
+    const content = `
+export const accountShares = pgTable(
+  "account_shares",
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull(),
+  }
+);
+`;
+    const { tables } = drizzleAdapter.extract(content, FILE);
+    expect(tables).toHaveLength(1);
+    expect(tables[0].name).toBe("account_shares");
+    expect(tables[0].varName).toBe("accountShares");
+  });
+
+  it("extrait plusieurs tables dont certaines multi-lignes", () => {
+    const content = `
+export const users = pgTable('users', { id: uuid('id').primaryKey() });
+
+export const accountShares = pgTable(
+  "account_shares",
+  { userId: uuid('user_id').notNull() }
+);
+`;
+    const { tables } = drizzleAdapter.extract(content, FILE);
+    expect(tables).toHaveLength(2);
+    expect(tables.map((t) => t.name)).toContain("users");
+    expect(tables.map((t) => t.name)).toContain("account_shares");
+  });
+
+  it("extrait une table avec indentation par tabulation après pgTable(", () => {
+    const content = `export const items = pgTable(\t"items", { id: uuid('id').primaryKey() });`;
+    const { tables } = drizzleAdapter.extract(content, FILE);
+    expect(tables).toHaveLength(1);
+    expect(tables[0].name).toBe("items");
+  });
+
+  it("extrait une table multi-lignes avec 3ème argument (index/contrainte)", () => {
+    const content = `
+export const accountShares = pgTable(
+  "account_shares",
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    accountId: uuid('account_id').notNull(),
+    sharedWithUserId: uuid('shared_with_user_id').notNull(),
+  },
+  (t) => [unique().on(t.accountId, t.sharedWithUserId)]
+);
+`;
+    const { tables } = drizzleAdapter.extract(content, FILE);
+    expect(tables).toHaveLength(1);
+    expect(tables[0].name).toBe("account_shares");
+  });
 });
 
 describe("parseKnexColumn", () => {

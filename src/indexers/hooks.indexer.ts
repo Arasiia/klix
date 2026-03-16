@@ -88,7 +88,7 @@ export function runHooksIndexerGrouped(rootDir: string, config: KlixConfig): Map
   const byDomain = new Map<string, HookEntry[]>();
 
   for (const entry of [...allQueryKeys, ...allHooks]) {
-    const domain = extractDomain(entry.file);
+    const domain = extractDomain(entry.file, config.domainDepth ?? 1);
     if (!byDomain.has(domain)) byDomain.set(domain, []);
     byDomain.get(domain)!.push(entry);
   }

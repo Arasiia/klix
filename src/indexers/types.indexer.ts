@@ -148,7 +148,7 @@ export function runTypesIndexerGrouped(rootDir: string, config: KlixConfig): Map
   const deduped = collectTypes(rootDir, config);
   const byDomain = new Map<string, TypeEntry[]>();
   for (const t of deduped) {
-    const domain = extractDomain(t.file);
+    const domain = extractDomain(t.file, config.domainDepth ?? 1);
     if (!byDomain.has(domain)) byDomain.set(domain, []);
     byDomain.get(domain)!.push(t);
   }

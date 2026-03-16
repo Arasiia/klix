@@ -46,7 +46,7 @@ Résultat après fusion :
     "routes": { "enabled": true, "framework": "express", "apiPrefix": "/api", "filePattern": "**/*.routes.ts" },
     "functions": { "enabled": true, "includeJsDoc": true, "servicePattern": "**/*.service.ts", "excludeTsx": true },
     "types": { "enabled": true, "filePatterns": ["**/*.api.ts", "**/*.types.ts", "**/*.store.ts"] },
-    "dbSchema": { "enabled": true, "framework": "drizzle", "filePattern": "server/src/db/schema/*.ts" },
+    "dbSchema": { "enabled": true, "framework": "drizzle", "filePattern": "server/src/db/schema/**/*.ts" },
     "hooks": { "enabled": true, "filePattern": "**/hooks/use-*.ts", "framework": "tanstack-query" }
   },
   "claude": { "claudeMdPath": "CLAUDE.md", "conventions": [] }
@@ -73,6 +73,7 @@ Points clés :
 | `exclude` | `string[]` | *(voir ci-dessous)* | Globs des fichiers à exclure de l'indexation |
 | `splitThreshold` | `number` | `150` | Nombre de lignes au-delà duquel un index est découpé par domaine |
 | `maxSections` | `number` | `20` | Nombre max de domaines (l'excédent est regroupé dans `_others.md`) |
+| `domainDepth` | `number` | `1` | Profondeur de découpage des domaines (1 = premier dossier, 2 = deux niveaux) |
 | `workspaces` | `string[]` | — | Chemins des workspaces pour les monorepos |
 
 ### Valeurs par défaut de `include`
@@ -175,7 +176,7 @@ Chaque indexer se configure dans l'objet `indexers`. Tous possèdent une option 
 |--------|------|--------|-------------------|-------------|
 | `enabled` | `boolean` | `true` | | Active/désactive |
 | `framework` | `string` | `"drizzle"` | `"drizzle"`, `"knex"` | ORM utilisé |
-| `filePattern` | `string` | `"server/src/db/schema/*.ts"` | | Glob des fichiers de schéma |
+| `filePattern` | `string` | `"server/src/db/schema/**/*.ts"` | | Glob des fichiers de schéma |
 
 ### `indexers.hooks`
 
@@ -212,6 +213,7 @@ klix supporte les monorepos via l'option `workspaces`. Chaque workspace est inde
 
 - `klix init` auto-détecte les workspaces depuis `package.json` (champ `workspaces`)
 - Les chemins sont relatifs à la racine du monorepo
+- Les patterns glob (`packages/*`, `apps/*`) sont supportés et résolus automatiquement
 
 ```json
 {
@@ -219,6 +221,35 @@ klix supporte les monorepos via l'option `workspaces`. Chaque workspace est inde
   "workspaces": ["packages/api", "packages/web", "packages/shared"]
 }
 ```
+
+Avec des globs (style Yarn/pnpm workspaces) :
+
+```json
+{
+  "name": "Mon Monorepo",
+  "workspaces": ["apps/*", "packages/*"]
+}
+```
+
+---
+
+## `domainDepth` — Granularité des domaines
+
+Contrôle la finesse du découpage par domaine lors du split. Par défaut (`1`), klix prend uniquement le **premier segment significatif** du chemin comme domaine.
+
+Avec `domainDepth: 2`, klix descend deux niveaux, ce qui est utile pour les projets organisés en modules ou features.
+
+| Chemin | depth=1 | depth=2 |
+|--------|---------|---------|
+| `src/modules/accounts/accounts.service.ts` | `modules` | `modules.accounts` |
+| `src/modules/auth/auth.service.ts` | `modules` | `modules.auth` |
+| `src/api/accounts.api.ts` | `api` | `api.accounts` |
+| `src/hooks/use-accounts.ts` | `hooks` | `hooks.use-accounts` |
+| `src/auth/auth.service.ts` | `auth` | `auth` *(dédup automatique)* |
+
+**Cas d'usage typique** : projet avec une structure `src/modules/<feature>/` ou `src/features/<feature>/`, où depth=1 regroupe tout dans un seul fichier `FUNCTIONS/modules.md` trop volumineux.
+
+`klix init` détecte automatiquement et écrit `domainDepth: 2` si la structure du projet le justifie.
 
 ---
 
@@ -277,6 +308,15 @@ Tout le reste utilise les valeurs par défaut.
 {
   "name": "Acme Platform",
   "workspaces": ["apps/api", "apps/web", "packages/shared"]
+}
+```
+
+Ou avec des globs si votre `package.json` racine utilise la syntaxe Yarn/pnpm :
+
+```json
+{
+  "name": "Acme Platform",
+  "workspaces": ["apps/*", "packages/*"]
 }
 ```
 

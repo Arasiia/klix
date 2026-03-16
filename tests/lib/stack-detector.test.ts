@@ -7,6 +7,7 @@ import {
   detectFrameworksFromStack,
   loadDepsFromPackageJson,
   buildStackMarkdown,
+  isFrontendOnlyProject,
   LIB_REGISTRY,
 } from "../../src/lib/stack-detector";
 import { ROUTE_ADAPTERS, DB_ADAPTERS, HOOKS_ADAPTERS } from "../../src/adapters";
@@ -155,6 +156,54 @@ describe("loadDepsFromPackageJson", () => {
     writeFileSync(join(tmpDir, "package.json"), "{ invalid }");
     const deps = loadDepsFromPackageJson(tmpDir);
     expect(deps).toEqual({});
+  });
+});
+
+describe("isFrontendOnlyProject", () => {
+  it("react + vite → true", () => {
+    expect(isFrontendOnlyProject({ react: "^18.0.0", vite: "^5.0.0" })).toBe(true);
+  });
+
+  it("vue seul → true", () => {
+    expect(isFrontendOnlyProject({ vue: "^3.0.0" })).toBe(true);
+  });
+
+  it("svelte seul → true", () => {
+    expect(isFrontendOnlyProject({ svelte: "^4.0.0" })).toBe(true);
+  });
+
+  it("react + express → false (backend présent)", () => {
+    expect(isFrontendOnlyProject({ react: "^18.0.0", express: "^4.0.0" })).toBe(false);
+  });
+
+  it("react + elysia → false (backend présent)", () => {
+    expect(isFrontendOnlyProject({ react: "^18.0.0", elysia: "^1.0.0" })).toBe(false);
+  });
+
+  it("react + next → false (framework hybride SSR)", () => {
+    expect(isFrontendOnlyProject({ react: "^18.0.0", next: "^14.0.0" })).toBe(false);
+  });
+
+  it("react + nuxt → false (framework hybride SSR)", () => {
+    expect(isFrontendOnlyProject({ react: "^18.0.0", nuxt: "^3.0.0" })).toBe(false);
+  });
+
+  it("deps vides → false", () => {
+    expect(isFrontendOnlyProject({})).toBe(false);
+  });
+
+  it("express seul (sans frontend) → false", () => {
+    expect(isFrontendOnlyProject({ express: "^4.0.0" })).toBe(false);
+  });
+
+  it("react + tanstack-query + tailwind → true (pas de backend)", () => {
+    expect(
+      isFrontendOnlyProject({
+        react: "^18.0.0",
+        "@tanstack/react-query": "^5.0.0",
+        tailwindcss: "^3.0.0",
+      }),
+    ).toBe(true);
   });
 });
 

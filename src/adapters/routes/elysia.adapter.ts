@@ -39,7 +39,7 @@ export const elysiaAdapter: RouteAdapter = {
       const bodyVarName = match[4];
       const bodyDesc = bodyVarName ? bodyVars.get(bodyVarName) : undefined;
 
-      const fullPath = `${apiPrefix}${routePrefix}${routePath}`;
+      const fullPath = `${apiPrefix}${routePrefix}${routePath}`.replace(/\/+/g, "/");
       routes.push({
         method,
         path: fullPath,

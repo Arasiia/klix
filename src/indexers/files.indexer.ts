@@ -81,7 +81,7 @@ export function runFilesIndexerGrouped(rootDir: string, config: KlixConfig): Map
   const entries = collectFiles(rootDir, config);
   const byDomain = new Map<string, FileEntry[]>();
   for (const entry of entries) {
-    const domain = extractDomain(entry.path);
+    const domain = extractDomain(entry.path, config.domainDepth ?? 1);
     if (!byDomain.has(domain)) byDomain.set(domain, []);
     byDomain.get(domain)!.push(entry);
   }

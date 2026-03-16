@@ -110,6 +110,25 @@ export const LIB_REGISTRY: LibEntry[] = [
   { pkg: "graphql", label: "GraphQL", category: "Utils" },
 ];
 
+// Frameworks purement frontend (sans composant serveur HTTP)
+// Note: next, nuxt, @remix-run/node, astro sont hybrides → exclus
+const PURE_FRONTEND_PKGS = new Set(["react", "vue", "svelte", "solid-js", "preact"]);
+// Frameworks hybrides SSR (frontend + backend HTTP intégré)
+const HYBRID_SSR_PKGS = new Set(["next", "nuxt", "@remix-run/node", "astro"]);
+
+/**
+ * Retourne true si le projet est un frontend pur (React, Vue, Svelte…)
+ * sans aucun framework backend HTTP ni SSR hybride.
+ *
+ * Utilisé par init.cmd.ts pour désactiver l'indexeur de routes.
+ */
+export function isFrontendOnlyProject(deps: Record<string, string>): boolean {
+  const backendPkgs = LIB_REGISTRY.filter((l) => l.category === "Backend").map((l) => l.pkg);
+  if (backendPkgs.some((p) => p in deps)) return false;
+  if ([...HYBRID_SSR_PKGS].some((p) => p in deps)) return false;
+  return [...PURE_FRONTEND_PKGS].some((p) => p in deps);
+}
+
 export function detectStack(deps: Record<string, string>): DetectedLib[] {
   return LIB_REGISTRY.filter((lib) => lib.pkg in deps).map((lib) => ({ ...lib, version: deps[lib.pkg] }));
 }
