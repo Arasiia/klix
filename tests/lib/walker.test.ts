@@ -55,6 +55,20 @@ describe("matchesAnyPattern", () => {
   it("normalise les backslashes Windows", () => {
     expect(matchesAnyPattern("src\\foo.ts", ["src/**/*.ts"])).toBe(true);
   });
+
+  it("correspond avec brace expansion {ts,js}", () => {
+    expect(matchesAnyPattern("src/foo.ts", ["src/*.{ts,js}"])).toBe(true);
+    expect(matchesAnyPattern("src/foo.js", ["src/*.{ts,js}"])).toBe(true);
+    expect(matchesAnyPattern("src/foo.py", ["src/*.{ts,js}"])).toBe(false);
+  });
+
+  it("correspond avec brace expansion et ** récursif", () => {
+    expect(matchesAnyPattern("migrations/001.ts", ["**/migrations/**/*.{ts,js}"])).toBe(true);
+  });
+
+  it("correspond avec brace expansion multi-alternatives", () => {
+    expect(matchesAnyPattern("a.config.mjs", ["*.config.{ts,js,mjs,cjs}"])).toBe(true);
+  });
 });
 
 describe("walkFiles", () => {
@@ -100,6 +114,18 @@ describe("walkFiles", () => {
   it("ne plante pas si le dossier n'existe pas", () => {
     const files = walkFiles("/nonexistent/path", ["**/*.ts"], []);
     expect(files).toHaveLength(0);
+  });
+});
+
+describe("walkFiles avec brace expansion", () => {
+  it("trouve les fichiers .ts et .js avec un pattern {ts,js}", () => {
+    writeFileSync(join(tmpDir, "foo.ts"), "");
+    writeFileSync(join(tmpDir, "bar.js"), "");
+    writeFileSync(join(tmpDir, "baz.py"), "");
+    const files = walkFiles(tmpDir, ["**/*.{ts,js}"], []);
+    expect(files.some((f) => f.endsWith("foo.ts"))).toBe(true);
+    expect(files.some((f) => f.endsWith("bar.js"))).toBe(true);
+    expect(files.some((f) => f.endsWith("baz.py"))).toBe(false);
   });
 });
 

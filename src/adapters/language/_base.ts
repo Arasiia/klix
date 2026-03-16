@@ -61,4 +61,20 @@ export interface LanguageAdapter {
   enumPattern: RegExp;
   /** Si vrai, l'indexeur functions extrait aussi les méthodes de service */
   extractServiceMethods?: boolean;
+
+  /**
+   * Détecte les fonctions nommées non-exportées (`function foo(params)`)
+   * Groupes attendus : [1]=async?, [2]=nom, [3]=params
+   */
+  namedFunctionPattern?: RegExp;
+  /**
+   * Détecte les variables avec arrow/function expression (`const fn = () =>`)
+   * Groupes attendus : [1]=keyword, [2]=nom, [3]=async?, [4]=params (function expr), [5]=params (arrow)
+   */
+  varFunctionPattern?: RegExp;
+  /**
+   * Détecte les déclarations de classes (`class Foo`)
+   * Groupes attendus : [1]=export?, [2]=nom, [3]=extends?
+   */
+  classDeclarationPattern?: RegExp;
 }

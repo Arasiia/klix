@@ -7,8 +7,11 @@ import {
   extractSignature,
   extractExportedFunctions,
   extractServiceMethods,
+  extractClassMethods,
+  extractAllFunctions,
   runFunctionsIndexer,
 } from "../../src/indexers/functions.indexer";
+import { typescriptAdapter } from "../../src/adapters/language/typescript.adapter";
 import { DEFAULT_CONFIG } from "../../src/lib/config";
 
 let tmpDir: string;
@@ -188,6 +191,176 @@ class Srv {
   });
 });
 
+describe("extractClassMethods", () => {
+  const file = "/fake/user.service.ts";
+
+  it("extrait les méthodes avec indentation 4 espaces", () => {
+    const content = `
+class UserService {
+    getUser(id: string) {
+        return null;
+    }
+}`;
+    const methods = extractClassMethods(content, file, false);
+    expect(methods.some((m) => m.name === "getUser")).toBe(true);
+    expect(methods[0].kind).toBe("class-method");
+  });
+
+  it("extrait les méthodes statiques", () => {
+    const content = `
+class MathUtils {
+  static compute(a: number, b: number) {
+    return a + b;
+  }
+  static async fetchAndCompute(url: string) {
+    return 0;
+  }
+}`;
+    const methods = extractClassMethods(content, file, false);
+    expect(methods.some((m) => m.name === "compute")).toBe(true);
+    expect(methods.some((m) => m.name === "fetchAndCompute")).toBe(true);
+    const asyncMethod = methods.find((m) => m.name === "fetchAndCompute");
+    expect(asyncMethod?.isAsync).toBe(true);
+  });
+});
+
+describe("extractAllFunctions", () => {
+  const file = "/fake/module.ts";
+
+  it("extrait function foo() non-exporté", () => {
+    const content = `function foo(x: number) { return x; }`;
+    const fns = extractAllFunctions(content, file, false, typescriptAdapter);
+    const fn = fns.find((f) => f.name === "foo");
+    expect(fn).toBeDefined();
+    expect(fn?.kind).toBe("named");
+  });
+
+  it("extrait const fn = () => non-exporté", () => {
+    const content = `const greet = (name: string) => "hello " + name;`;
+    const fns = extractAllFunctions(content, file, false, typescriptAdapter);
+    const fn = fns.find((f) => f.name === "greet");
+    expect(fn).toBeDefined();
+    expect(fn?.kind).toBe("named");
+  });
+
+  it("extrait const fn = function() non-exporté", () => {
+    const content = `const greet = function(name: string) { return "hello"; }`;
+    const fns = extractAllFunctions(content, file, false, typescriptAdapter);
+    const fn = fns.find((f) => f.name === "greet");
+    expect(fn).toBeDefined();
+    expect(fn?.kind).toBe("named");
+  });
+
+  it("extrait export default function name()", () => {
+    const content = `export default function main(args: string[]) { }`;
+    const fns = extractAllFunctions(content, file, false, typescriptAdapter);
+    const fn = fns.find((f) => f.name === "main");
+    expect(fn).toBeDefined();
+    expect(fn?.kind).toBe("default-export");
+  });
+
+  it("extrait export default function() (anonyme)", () => {
+    const content = `export default function(req: Request) { }`;
+    const fns = extractAllFunctions(content, file, false, typescriptAdapter);
+    const fn = fns.find((f) => f.name === "default");
+    expect(fn).toBeDefined();
+    expect(fn?.kind).toBe("default-export");
+  });
+
+  it("extrait Foo.prototype.bar = function()", () => {
+    const content = `Foo.prototype.bar = function(x) { return x; }`;
+    const fns = extractAllFunctions(content, file, false, typescriptAdapter);
+    const fn = fns.find((f) => f.name === "Foo.prototype.bar");
+    expect(fn).toBeDefined();
+    expect(fn?.kind).toBe("prototype");
+  });
+
+  it("extrait module.exports.name = function()", () => {
+    const content = `module.exports.parse = function(input) { return input; }`;
+    const fns = extractAllFunctions(content, file, false, typescriptAdapter);
+    const fn = fns.find((f) => f.name === "parse");
+    expect(fn).toBeDefined();
+    expect(fn?.kind).toBe("cjs-export");
+  });
+
+  it("extrait exports.name = function()", () => {
+    const content = `exports.format = function(str) { return str; }`;
+    const fns = extractAllFunctions(content, file, false, typescriptAdapter);
+    const fn = fns.find((f) => f.name === "format");
+    expect(fn).toBeDefined();
+    expect(fn?.kind).toBe("cjs-export");
+  });
+
+  it("extrait function* gen() (générateur)", () => {
+    const content = `function* range(start: number, end: number) { yield start; }`;
+    const fns = extractAllFunctions(content, file, false, typescriptAdapter);
+    const fn = fns.find((f) => f.name === "range");
+    expect(fn).toBeDefined();
+    expect(fn?.kind).toBe("generator");
+  });
+
+  it("extrait export function* gen() (générateur exporté)", () => {
+    const content = `export function* items(list: any[]) { yield list[0]; }`;
+    const fns = extractAllFunctions(content, file, false, typescriptAdapter);
+    const fn = fns.find((f) => f.name === "items");
+    expect(fn).toBeDefined();
+    expect(fn?.kind).toBe("generator");
+  });
+
+  it("extrait les méthodes de classe dans un fichier non-service", () => {
+    const content = `
+class Parser {
+  parse(input: string) {
+    return input;
+  }
+}`;
+    const fns = extractAllFunctions(content, file, false, typescriptAdapter);
+    const fn = fns.find((f) => f.name === "parse");
+    expect(fn).toBeDefined();
+    expect(fn?.kind).toBe("class-method");
+  });
+
+  it("extrait static async compute()", () => {
+    const content = `
+class Utils {
+  static async compute(data: number[]) {
+    return 0;
+  }
+}`;
+    const fns = extractAllFunctions(content, file, false, typescriptAdapter);
+    const fn = fns.find((f) => f.name === "compute");
+    expect(fn).toBeDefined();
+    expect(fn?.kind).toBe("class-method");
+    expect(fn?.isAsync).toBe(true);
+  });
+
+  it("ne duplique pas une export function", () => {
+    const content = `export function greet(name: string) { return "hi"; }`;
+    const fns = extractAllFunctions(content, file, false, typescriptAdapter);
+    const matches = fns.filter((f) => f.name === "greet");
+    expect(matches).toHaveLength(1);
+    expect(matches[0].kind).toBe("exported");
+  });
+
+  it("ne duplique pas un export const arrow", () => {
+    const content = `export const add = (a: number, b: number) => a + b;`;
+    const fns = extractAllFunctions(content, file, false, typescriptAdapter);
+    const matches = fns.filter((f) => f.name === "add");
+    expect(matches).toHaveLength(1);
+    expect(matches[0].kind).toBe("exported");
+  });
+
+  it("attribue le bon kind à chaque type", () => {
+    const content = `export function exp(x: number) { return x; }
+function named(y: number) { return y; }
+const arrow = (z: number) => z;`;
+    const fns = extractAllFunctions(content, file, false, typescriptAdapter);
+    expect(fns.find((f) => f.name === "exp")?.kind).toBe("exported");
+    expect(fns.find((f) => f.name === "named")?.kind).toBe("named");
+    expect(fns.find((f) => f.name === "arrow")?.kind).toBe("named");
+  });
+});
+
 describe("runFunctionsIndexer", () => {
   it("génère le header avec le nom du projet", () => {
     const config = { ...DEFAULT_CONFIG, name: "my-app", include: [], exclude: [] };
@@ -195,11 +368,14 @@ describe("runFunctionsIndexer", () => {
     expect(output).toContain("# FUNCTIONS — my-app");
   });
 
-  it("liste les fonctions exportées", () => {
+  it("liste les fonctions exportées et non-exportées", () => {
     mkdirSync(join(tmpDir, "src"));
     writeFileSync(
       join(tmpDir, "src", "utils.ts"),
-      `export function greet(name: string) { return "hello " + name; }\nexport async function fetchData() { return []; }`,
+      `export function greet(name: string) { return "hello " + name; }
+export async function fetchData() { return []; }
+function helper(x: number) { return x * 2; }
+const transform = (s: string) => s.toUpperCase();`,
     );
     const config = {
       ...DEFAULT_CONFIG,
@@ -219,5 +395,10 @@ describe("runFunctionsIndexer", () => {
     expect(output).toContain("greet");
     expect(output).toContain("fetchData");
     expect(output).toContain("async ");
+    expect(output).toContain("helper");
+    expect(output).toContain("transform");
+    expect(output).toContain("`named`");
+    expect(output).not.toContain("fonctions exportées");
+    expect(output).toContain("fonctions");
   });
 });

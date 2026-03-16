@@ -1,16 +1,28 @@
 import { readdirSync, statSync } from "fs";
 import { join, relative } from "path";
 
-function matchGlob(pattern: string, filePath: string): boolean {
+function expandBraces(pattern: string): string[] {
+  const match = pattern.match(/^(.*?)\{([^}]+)\}(.*)$/);
+  if (!match) return [pattern];
+  const [, prefix, alternatives, suffix] = match;
+  return alternatives.split(",").flatMap((alt) => expandBraces(prefix + alt + suffix));
+}
+
+function matchGlobSingle(pattern: string, filePath: string): boolean {
   // Convert glob to regex
   const escaped = pattern
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/[.+^$()|[\]\\]/g, "\\$&")
     .replace(/\?/g, "[^/]") // Glob ? → avant d'introduire des ? de quantificateur
     .replace(/\*\*\//g, "(.+/)?") // **/ → groupe optionnel
     .replace(/\*\*/g, ".+") // ** → n'importe quoi
     .replace(/\*/g, "[^/]+"); // * → segment sans /
   const regex = new RegExp(`^${escaped}$`);
   return regex.test(filePath) || regex.test(filePath.replace(/^\.\//, ""));
+}
+
+function matchGlob(pattern: string, filePath: string): boolean {
+  const expanded = expandBraces(pattern);
+  return expanded.some((p) => matchGlobSingle(p, filePath));
 }
 
 export function matchesAnyPattern(filePath: string, patterns: string[]): boolean {

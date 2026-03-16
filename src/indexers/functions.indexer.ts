@@ -99,12 +99,22 @@ export function extractSignature(content: string, startIdx: number): string {
   return `(${names.join(", ")})`;
 }
 
+export type FunctionKind =
+  | "exported"
+  | "named"
+  | "class-method"
+  | "prototype"
+  | "cjs-export"
+  | "default-export"
+  | "generator";
+
 export interface FunctionEntry {
   name: string;
   signature: string;
   jsDoc?: string;
   file: string;
   isAsync: boolean;
+  kind?: FunctionKind;
 }
 
 export function extractJsDoc(content: string, funcStart: number): string | undefined {
@@ -197,14 +207,15 @@ export function extractExportedFunctions(
   return results;
 }
 
-export function extractServiceMethods(content: string, filePath: string, includeJsDoc: boolean): FunctionEntry[] {
+export function extractClassMethods(content: string, filePath: string, includeJsDoc: boolean): FunctionEntry[] {
   const results: FunctionEntry[] = [];
   const file = relative(process.cwd(), filePath).replace(/\\/g, "/");
 
   const SKIP = new Set(["constructor", "if", "for", "while", "switch", "catch"]);
   const seen = new Set<number>();
 
-  const methodPattern = /^  (async\s+)?(\w+)\s*\(([^)]*(?:\([^)]*\)[^)]*)*)\)/gm;
+  // Méthodes standard (2+ espaces d'indentation)
+  const methodPattern = /^\s{2,}(async\s+)?(\w+)\s*\(([^)]*(?:\([^)]*\)[^)]*)*)\)/gm;
   let match;
   while ((match = methodPattern.exec(content)) !== null) {
     const name = match[2];
@@ -218,10 +229,30 @@ export function extractServiceMethods(content: string, filePath: string, include
       jsDoc,
       file,
       isAsync: !!match[1],
+      kind: "class-method",
     });
   }
 
-  const arrowPattern = /^  (\w+):\s*(async\s*)?\(([^)]*(?:\([^)]*\)[^)]*)*)\)\s*=>/gm;
+  // Méthodes statiques
+  const staticPattern = /^\s{2,}static\s+(async\s+)?(\w+)\s*\(([^)]*(?:\([^)]*\)[^)]*)*)\)/gm;
+  while ((match = staticPattern.exec(content)) !== null) {
+    if (seen.has(match.index)) continue;
+    const name = match[2];
+    if (SKIP.has(name)) continue;
+
+    const jsDoc = includeJsDoc ? extractJsDoc(content, match.index) : undefined;
+    results.push({
+      name,
+      signature: buildTypedSignature(match[3]),
+      jsDoc,
+      file,
+      isAsync: !!match[1],
+      kind: "class-method",
+    });
+  }
+
+  // Arrow methods dans les classes (propriétés)
+  const arrowPattern = /^\s{2,}(\w+):\s*(async\s*)?\(([^)]*(?:\([^)]*\)[^)]*)*)\)\s*=>/gm;
   while ((match = arrowPattern.exec(content)) !== null) {
     if (seen.has(match.index)) continue;
     const name = match[1];
@@ -234,27 +265,187 @@ export function extractServiceMethods(content: string, filePath: string, include
       jsDoc,
       file,
       isAsync: !!match[2],
+      kind: "class-method",
     });
   }
 
   return results;
 }
 
+/** @deprecated Utiliser extractClassMethods */
+export function extractServiceMethods(content: string, filePath: string, includeJsDoc: boolean): FunctionEntry[] {
+  return extractClassMethods(content, filePath, includeJsDoc);
+}
+
+/**
+ * Extrait toutes les fonctions d'un fichier : exportées, nommées, class methods,
+ * prototype, CJS exports, default exports, generators.
+ */
+export function extractAllFunctions(
+  content: string,
+  filePath: string,
+  includeJsDoc: boolean,
+  langAdapter: LanguageAdapter = typescriptAdapter,
+): FunctionEntry[] {
+  const results: FunctionEntry[] = [];
+  const file = relative(process.cwd(), filePath).replace(/\\/g, "/");
+  const capturedNames = new Set<string>();
+
+  // 1. Generator functions (avant exported pour éviter doublons)
+  const generatorPattern = /^(export\s+)?(async\s+)?function\s*\*\s*(\w+)\s*\(([^)]*(?:\([^)]*\)[^)]*)*)\)/gm;
+  let match;
+  while ((match = generatorPattern.exec(content)) !== null) {
+    const jsDoc = includeJsDoc ? extractJsDoc(content, match.index) : undefined;
+    results.push({
+      name: match[3],
+      signature: buildTypedSignature(match[4]),
+      jsDoc,
+      file,
+      isAsync: !!match[2],
+      kind: "generator",
+    });
+    capturedNames.add(match[3]);
+  }
+
+  // 2. Export default function
+  const defaultExportPattern = /^export\s+default\s+(async\s+)?function\s*(\w*)\s*\(([^)]*(?:\([^)]*\)[^)]*)*)\)/gm;
+  while ((match = defaultExportPattern.exec(content)) !== null) {
+    const name = match[2] || "default";
+    if (capturedNames.has(name)) continue;
+    const jsDoc = includeJsDoc ? extractJsDoc(content, match.index) : undefined;
+    results.push({
+      name,
+      signature: buildTypedSignature(match[3]),
+      jsDoc,
+      file,
+      isAsync: !!match[1],
+      kind: "default-export",
+    });
+    capturedNames.add(name);
+  }
+
+  // 3. Exported functions (existant)
+  const exported = extractExportedFunctions(content, filePath, includeJsDoc, langAdapter);
+  for (const fn of exported) {
+    if (capturedNames.has(fn.name)) continue;
+    fn.kind = "exported";
+    results.push(fn);
+    capturedNames.add(fn.name);
+  }
+
+  // 4. Named functions non-exportées (adapter pattern)
+  if (langAdapter.namedFunctionPattern) {
+    const namedPattern = new RegExp(langAdapter.namedFunctionPattern.source, langAdapter.namedFunctionPattern.flags);
+    while ((match = namedPattern.exec(content)) !== null) {
+      const name = match[2];
+      if (capturedNames.has(name)) continue;
+      // Vérifier que ce n'est pas une ligne exportée
+      const lineStart = content.lastIndexOf("\n", match.index) + 1;
+      const linePrefix = content.slice(lineStart, match.index);
+      if (linePrefix.includes("export")) continue;
+      const jsDoc = includeJsDoc ? extractJsDoc(content, match.index) : undefined;
+      results.push({
+        name,
+        signature: buildTypedSignature(match[3]),
+        jsDoc,
+        file,
+        isAsync: !!match[1],
+        kind: "named",
+      });
+      capturedNames.add(name);
+    }
+  }
+
+  // 5. Variable functions non-exportées (adapter pattern)
+  if (langAdapter.varFunctionPattern) {
+    const varPattern = new RegExp(langAdapter.varFunctionPattern.source, langAdapter.varFunctionPattern.flags);
+    while ((match = varPattern.exec(content)) !== null) {
+      const name = match[2];
+      if (capturedNames.has(name)) continue;
+      // Vérifier que ce n'est pas une ligne exportée
+      const lineStart = content.lastIndexOf("\n", match.index) + 1;
+      const linePrefix = content.slice(lineStart, match.index);
+      if (linePrefix.includes("export")) continue;
+      const params = match[4] ?? match[5] ?? "";
+      const jsDoc = includeJsDoc ? extractJsDoc(content, match.index) : undefined;
+      results.push({
+        name,
+        signature: buildTypedSignature(params),
+        jsDoc,
+        file,
+        isAsync: !!match[3],
+        kind: "named",
+      });
+      capturedNames.add(name);
+    }
+  }
+
+  // 6. Prototype methods (universel)
+  const protoPattern = /^(\w[\w.]*?)\.prototype\.(\w+)\s*=\s*(async\s+)?function/gm;
+  while ((match = protoPattern.exec(content)) !== null) {
+    const name = `${match[1]}.prototype.${match[2]}`;
+    const jsDoc = includeJsDoc ? extractJsDoc(content, match.index) : undefined;
+    results.push({
+      name,
+      signature: extractSignature(content, match.index),
+      jsDoc,
+      file,
+      isAsync: !!match[3],
+      kind: "prototype",
+    });
+  }
+
+  // 7. CJS exports: module.exports.name = function / exports.name = function
+  const cjsNamedPattern = /^(?:module\.)?exports\.(\w+)\s*=\s*(async\s+)?function/gm;
+  while ((match = cjsNamedPattern.exec(content)) !== null) {
+    const name = match[1];
+    if (capturedNames.has(name)) continue;
+    const jsDoc = includeJsDoc ? extractJsDoc(content, match.index) : undefined;
+    results.push({
+      name,
+      signature: extractSignature(content, match.index),
+      jsDoc,
+      file,
+      isAsync: !!match[2],
+      kind: "cjs-export",
+    });
+    capturedNames.add(name);
+  }
+
+  // CJS: module.exports = function name()
+  const cjsDefaultPattern = /^module\.exports\s*=\s*(async\s+)?function\s+(\w+)/gm;
+  while ((match = cjsDefaultPattern.exec(content)) !== null) {
+    const name = match[2];
+    if (capturedNames.has(name)) continue;
+    const jsDoc = includeJsDoc ? extractJsDoc(content, match.index) : undefined;
+    results.push({
+      name,
+      signature: extractSignature(content, match.index),
+      jsDoc,
+      file,
+      isAsync: !!match[1],
+      kind: "cjs-export",
+    });
+    capturedNames.add(name);
+  }
+
+  // 8. Class methods (tous les fichiers)
+  const classMethods = extractClassMethods(content, filePath, includeJsDoc);
+  results.push(...classMethods);
+
+  return results;
+}
+
 /** Helper interne : collecte toutes les fonctions sans sérialisation */
 function collectFunctions(rootDir: string, config: KlixConfig): FunctionEntry[] {
-  const { includeJsDoc, servicePattern, excludeTsx } = config.indexers.functions;
+  const { includeJsDoc, excludeTsx } = config.indexers.functions;
   const langAdapter = findLanguageAdapter(config.language) ?? typescriptAdapter;
 
   const allFiles = walkFiles(rootDir, config.include, config.exclude);
   const allFunctions: FunctionEntry[] = [];
 
-  const servicePatterns = Array.isArray(servicePattern) ? servicePattern : [servicePattern];
-  const serviceFiles = walkFiles(rootDir, servicePatterns, config.exclude);
-  const serviceFileSet = new Set(serviceFiles);
-
   for (const filePath of allFiles) {
     if (excludeTsx && filePath.endsWith(".tsx")) continue;
-    if (filePath.endsWith(".tsx")) continue;
 
     let content = "";
     try {
@@ -263,11 +454,7 @@ function collectFunctions(rootDir: string, config: KlixConfig): FunctionEntry[] 
       continue;
     }
 
-    if (serviceFileSet.has(filePath) && langAdapter.extractServiceMethods) {
-      allFunctions.push(...extractServiceMethods(content, filePath, includeJsDoc));
-    } else {
-      allFunctions.push(...extractExportedFunctions(content, filePath, includeJsDoc, langAdapter));
-    }
+    allFunctions.push(...extractAllFunctions(content, filePath, includeJsDoc, langAdapter));
   }
 
   return allFunctions;
@@ -304,7 +491,8 @@ export function serializeFunctionsSection(domain: string, entries: FunctionEntry
     lines.push(`## \`${file}\``);
     for (const fn of fns) {
       const asyncMark = fn.isAsync ? "async " : "";
-      lines.push(`- **${asyncMark}${fn.name}**\`${fn.signature}\``);
+      const kindBadge = fn.kind && fn.kind !== "exported" ? ` \`${fn.kind}\`` : "";
+      lines.push(`- **${asyncMark}${fn.name}**\`${fn.signature}\`${kindBadge}`);
       if (fn.jsDoc) lines.push(`  > ${fn.jsDoc}`);
     }
     lines.push(``);
@@ -323,13 +511,14 @@ export function runFunctionsIndexer(rootDir: string, config: KlixConfig): string
     byFile.get(fn.file)!.push(fn);
   }
 
-  const lines: string[] = [`# FUNCTIONS — ${config.name}`, ``, `> ${allFunctions.length} fonctions exportées`, ``];
+  const lines: string[] = [`# FUNCTIONS — ${config.name}`, ``, `> ${allFunctions.length} fonctions`, ``];
 
   for (const [file, fns] of byFile) {
     lines.push(`## \`${file}\``);
     for (const fn of fns) {
       const asyncMark = fn.isAsync ? "async " : "";
-      lines.push(`- **${asyncMark}${fn.name}**\`${fn.signature}\``);
+      const kindBadge = fn.kind && fn.kind !== "exported" ? ` \`${fn.kind}\`` : "";
+      lines.push(`- **${asyncMark}${fn.name}**\`${fn.signature}\`${kindBadge}`);
       if (fn.jsDoc) lines.push(`  > ${fn.jsDoc}`);
     }
     lines.push(``);
