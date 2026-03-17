@@ -1,6 +1,6 @@
 # klix
 
-[![version](https://img.shields.io/badge/version-0.1.7-blue)](https://github.com/Arasiia/klix/releases)
+[![version](https://img.shields.io/badge/version-0.1.8-blue)](https://github.com/Arasiia/klix/releases)
 [![latest](https://img.shields.io/github/v/release/Arasiia/klix)](https://github.com/Arasiia/klix/releases/latest)
 [![ci](https://github.com/Arasiia/klix/actions/workflows/ci.yml/badge.svg)](https://github.com/Arasiia/klix/actions/workflows/ci.yml)
 [![coverage](https://raw.githubusercontent.com/Arasiia/klix/gh-pages/coverage.svg)](https://github.com/Arasiia/klix/actions/workflows/ci.yml)
