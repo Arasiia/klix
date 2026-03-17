@@ -108,9 +108,9 @@ describe("expressAdapter", () => {
     expect(expressAdapter.extract("const x = express();", FILE, "")).toHaveLength(0);
   });
 
-  it("ignore le apiPrefix (Express gère son propre préfixe)", () => {
+  it("applique le apiPrefix au path", () => {
     const routes = expressAdapter.extract(`router.get('/test', h)`, FILE, "/api");
-    expect(routes[0].path).toBe("/test");
+    expect(routes[0].path).toBe("/api/test");
   });
 
   it("détecte app.get('/path', handler)", () => {
@@ -180,8 +180,160 @@ describe("expressAdapter", () => {
     expect(routes[0].path).toBe("/users/:id/posts/:postId");
   });
 
-  it("le defaultFilePattern inclut .js et .ts", () => {
-    expect(expressAdapter.defaultFilePattern).toBe("**/routes/**/*.{ts,js}");
+  it("le defaultFilePattern inclut routes/ et controllers/", () => {
+    expect(expressAdapter.defaultFilePattern).toBe("**/{routes,controllers}/**/*.{ts,js}");
+  });
+
+  it("détecte app.all('/path', handler)", () => {
+    const routes = expressAdapter.extract(`app.all('/health', healthCheck);`, FILE, "");
+    expect(routes).toHaveLength(1);
+    expect(routes[0].method).toBe("ALL");
+    expect(routes[0].path).toBe("/health");
+  });
+
+  it("détecte router.options('/path', handler)", () => {
+    const routes = expressAdapter.extract(`router.options('/cors', corsHandler);`, FILE, "");
+    expect(routes).toHaveLength(1);
+    expect(routes[0].method).toBe("OPTIONS");
+  });
+
+  it("détecte app.head('/path', handler)", () => {
+    const routes = expressAdapter.extract(`app.head('/ping', pingHandler);`, FILE, "");
+    expect(routes).toHaveLength(1);
+    expect(routes[0].method).toBe("HEAD");
+  });
+
+  it("détecte une route avec wildcard (:site_id*)", () => {
+    const routes = expressAdapter.extract(`app.get('/v1/sites/:site_id*', handler);`, FILE, "");
+    expect(routes).toHaveLength(1);
+    expect(routes[0].path).toContain(":site_id");
+  });
+
+  it("détecte une route avec middleware chain long", () => {
+    const routes = expressAdapter.extract(
+      `router.post('/users', auth, validate, userController.create);`,
+      FILE,
+      "",
+    );
+    expect(routes).toHaveLength(1);
+    expect(routes[0].method).toBe("POST");
+    expect(routes[0].path).toBe("/users");
+  });
+
+  it("extrait le handler depuis une middleware chain", () => {
+    const routes = expressAdapter.extract(
+      `router.get('/users', auth, userController.getAll);`,
+      FILE,
+      "",
+    );
+    expect(routes).toHaveLength(1);
+    expect(routes[0].handler).toBe("userController.getAll");
+  });
+
+  it("ignore les handlers de type cleanResponse/sendJSON", () => {
+    const routes = expressAdapter.extract(
+      `router.get('/users', getAll, cleanResponse);`,
+      FILE,
+      "",
+    );
+    expect(routes).toHaveLength(1);
+    expect(routes[0].handler).toBe("getAll");
+  });
+
+  it("supprime .bind() du handler", () => {
+    const routes = expressAdapter.extract(
+      `router.get('/users', ctrl.list.bind(ctrl));`,
+      FILE,
+      "",
+    );
+    expect(routes).toHaveLength(1);
+    expect(routes[0].handler).toBe("ctrl.list");
+  });
+
+  it("apiPrefix est pris en compte", () => {
+    const routes = expressAdapter.extract(`router.get('/users', handler);`, FILE, "/api/v2");
+    expect(routes).toHaveLength(1);
+    expect(routes[0].path).toBe("/api/v2/users");
+  });
+
+  it("apiPrefix '/' ne modifie pas le path", () => {
+    const routes = expressAdapter.extract(`router.get('/users', handler);`, FILE, "/");
+    expect(routes).toHaveLength(1);
+    expect(routes[0].path).toBe("/users");
+  });
+
+  it("apiPrefix + path ne produit pas de double slash", () => {
+    const routes = expressAdapter.extract(`router.get('/users', handler);`, FILE, "/api");
+    expect(routes[0].path).toBe("/api/users");
+    expect(routes[0].path).not.toMatch(/\/\//);
+  });
+
+  it("détecte une route multi-lignes avec middleware chain", () => {
+    const content = `app.get('/v1/me',
+    blueprintValidator.uriValidator,
+    blueprintValidator.queryValidator,
+    loadUser(),
+    userController.getMe.bind(userController),
+    cleanResponse,
+    sendJSON
+  )`;
+    const routes = expressAdapter.extract(content, FILE, "");
+    expect(routes).toHaveLength(1);
+    expect(routes[0].method).toBe("GET");
+    expect(routes[0].path).toBe("/v1/me");
+    expect(routes[0].handler).toBe("userController.getMe");
+  });
+
+  it("détecte plusieurs routes multi-lignes consécutives", () => {
+    const content = `
+  app.get('/v1/users',
+    loadUser(),
+    userController.getAll.bind(userController),
+    cleanResponse,
+    sendJSON
+  )
+  app.post('/v1/users',
+    loadUser(),
+    userController.create.bind(userController),
+    cleanResponse,
+    sendJSON
+  )
+  app.delete('/v1/users/:id',
+    loadUser(),
+    userController.delete.bind(userController),
+    cleanResponse,
+    sendJSON
+  )`;
+    const routes = expressAdapter.extract(content, FILE, "");
+    expect(routes).toHaveLength(3);
+    expect(routes[0].method).toBe("GET");
+    expect(routes[0].handler).toBe("userController.getAll");
+    expect(routes[1].method).toBe("POST");
+    expect(routes[1].handler).toBe("userController.create");
+    expect(routes[2].method).toBe("DELETE");
+    expect(routes[2].handler).toBe("userController.delete");
+  });
+
+  it("handler extrait correctement quand middleware contient des parenthèses", () => {
+    const content = `app.get('/v1/sites',
+    authorize(['sites_crud']),
+    loadAirportClient(true),
+    siteController.getAll.bind(siteController),
+    cleanResponse,
+    sendJSON
+  )`;
+    const routes = expressAdapter.extract(content, FILE, "");
+    expect(routes).toHaveLength(1);
+    expect(routes[0].handler).toBe("siteController.getAll");
+  });
+
+  it("route multi-lignes sans handler identifiable → handler undefined", () => {
+    const content = `app.get('/admin/status', function (req, res) {
+    res.json({ status: 'ok' })
+  })`;
+    const routes = expressAdapter.extract(content, FILE, "");
+    expect(routes).toHaveLength(1);
+    expect(routes[0].handler).toBeUndefined();
   });
 });
 

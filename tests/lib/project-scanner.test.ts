@@ -16,6 +16,7 @@ import {
   scanProject,
   shallowFileList,
   dirHasSourceFiles,
+  extGlob,
 } from "../../src/lib/project-scanner";
 
 let tmpDir: string;
@@ -98,6 +99,29 @@ describe("dirHasSourceFiles", () => {
 
   it("retourne false pour un dossier inexistant", () => {
     expect(dirHasSourceFiles(join(tmpDir, "nope"))).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  extGlob                                                            */
+/* ------------------------------------------------------------------ */
+
+describe("extGlob", () => {
+  it("typescript + tsconfig → {ts,tsx}", () => {
+    expect(extGlob("typescript", true)).toBe("{ts,tsx}");
+  });
+
+  it("javascript sans tsconfig → {js,jsx}", () => {
+    expect(extGlob("javascript", false)).toBe("{js,jsx}");
+  });
+
+  it("isMixed=true → {ts,tsx,js,jsx} quelle que soit la langue", () => {
+    expect(extGlob("typescript", true, true)).toBe("{ts,tsx,js,jsx}");
+    expect(extGlob("javascript", false, true)).toBe("{ts,tsx,js,jsx}");
+  });
+
+  it("typescript sans tsconfig (fallback) → {ts,tsx,js,jsx}", () => {
+    expect(extGlob("typescript", false)).toBe("{ts,tsx,js,jsx}");
   });
 });
 
@@ -685,6 +709,23 @@ describe("scanProject — framework hints", () => {
   it("pas de framework → pas de frameworkHints", () => {
     const scan = scanProject(tmpDir, {});
     expect(scan.frameworkHints).toBeUndefined();
+  });
+});
+
+describe("scanProject — projet mixte TS/JS (tsconfig + routes.js)", () => {
+  it("routes.filePattern contient {ts,tsx,js,jsx} quand isMixed", () => {
+    writePkg({ express: "^4.18.0" });
+    touch(join(tmpDir, "tsconfig.json"), "{}");
+    touch(join(tmpDir, "src/config.ts"), "");
+    touch(join(tmpDir, "src/routes/users.js"), "");
+    touch(join(tmpDir, "src/routes/orders.js"), "");
+    touch(join(tmpDir, "src/app.js"), "");
+
+    const scan = scanProject(tmpDir, { express: "^4.18.0" });
+
+    expect(scan.language).toBe("typescript");
+    expect(scan.routes.detected).toBe(true);
+    expect(scan.routes.filePattern).toContain("{ts,tsx,js,jsx}");
   });
 });
 

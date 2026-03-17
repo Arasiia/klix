@@ -1,5 +1,5 @@
 import { readFileSync } from "fs";
-import { relative } from "path";
+import { relative, basename, extname } from "path";
 import { walkFiles } from "../lib/walker";
 import type { KlixConfig } from "../lib/config";
 import { findLanguageAdapter } from "../adapters";
@@ -421,6 +421,41 @@ export function extractAllFunctions(
     results.push({
       name,
       signature: extractSignature(content, match.index),
+      jsDoc,
+      file,
+      isAsync: !!match[1],
+      kind: "cjs-export",
+    });
+    capturedNames.add(name);
+  }
+
+  // CJS: module.exports = function() { ... } (anonyme)
+  const fileBaseName = basename(filePath, extname(filePath));
+  const cjsAnonFnPattern = /^module\.exports\s*=\s*(async\s+)?function\s*\(/gm;
+  while ((match = cjsAnonFnPattern.exec(content)) !== null) {
+    const name = fileBaseName;
+    if (capturedNames.has(name)) continue;
+    const jsDoc = includeJsDoc ? extractJsDoc(content, match.index) : undefined;
+    results.push({
+      name,
+      signature: extractSignature(content, match.index),
+      jsDoc,
+      file,
+      isAsync: !!match[1],
+      kind: "cjs-export",
+    });
+    capturedNames.add(name);
+  }
+
+  // CJS: module.exports = (params) => { ... } (anonyme arrow)
+  const cjsArrowPattern = /^module\.exports\s*=\s*(async\s+)?\(([^)]*(?:\([^)]*\)[^)]*)*)\)\s*(?::[^=]*)?=>/gm;
+  while ((match = cjsArrowPattern.exec(content)) !== null) {
+    const name = fileBaseName;
+    if (capturedNames.has(name)) continue;
+    const jsDoc = includeJsDoc ? extractJsDoc(content, match.index) : undefined;
+    results.push({
+      name,
+      signature: buildTypedSignature(match[2]),
       jsDoc,
       file,
       isAsync: !!match[1],

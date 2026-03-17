@@ -80,7 +80,8 @@ export function shallowFileList(dir: string, maxDepth = 2): string[] {
  * Retourne le glob d'extensions selon le langage détecté.
  * Projet mixte (tsconfig + majorité JS) → inclut les deux.
  */
-export function extGlob(lang: "typescript" | "javascript", hasTsConfig: boolean): string {
+export function extGlob(lang: "typescript" | "javascript", hasTsConfig: boolean, isMixed = false): string {
+  if (isMixed) return "{ts,tsx,js,jsx}";
   if (lang === "typescript" && hasTsConfig) return "{ts,tsx}";
   if (lang === "javascript" && !hasTsConfig) return "{js,jsx}";
   // Projet mixte
@@ -620,7 +621,7 @@ export function scanProject(cwd: string, deps: Record<string, string>): ProjectS
   const include = buildIncludePatterns(sourceRoots, language, hasTsConfig, isMixed);
   const exclude = buildExcludePatterns(cwd, deps);
 
-  const ext = extGlob(language, hasTsConfig);
+  const ext = extGlob(language, hasTsConfig, isMixed);
   let routes = detectRouteFiles(cwd, sourceRoots, ext);
   const servicePattern = detectServiceFiles(cwd, sourceRoots, ext, deps);
   const typePatterns = detectTypeFiles(cwd, sourceRoots, ext);

@@ -8,6 +8,8 @@ export interface RouteEntry {
   path: string;
   /** Noms des champs du body, séparés par des virgules (ex: "name, type, amount") */
   body?: string;
+  /** Référence au handler (ex: "userController.getAll") */
+  handler?: string;
   /** Chemin relatif du fichier source */
   file: string;
 }

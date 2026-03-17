@@ -129,6 +129,44 @@ describe("walkFiles avec brace expansion", () => {
   });
 });
 
+describe("walkFiles — glob * matche 0 caractères", () => {
+  it("routes*.js matche routes.js (wildcard vide)", () => {
+    mkdirSync(join(tmpDir, "app"), { recursive: true });
+    writeFileSync(join(tmpDir, "app", "routes.js"), "");
+    writeFileSync(join(tmpDir, "app", "routes-v2.js"), "");
+    const files = walkFiles(tmpDir, ["app/routes*.js"], []);
+    expect(files.some((f) => f.endsWith("routes.js"))).toBe(true);
+    expect(files.some((f) => f.endsWith("routes-v2.js"))).toBe(true);
+  });
+
+  it("routes*.{ts,tsx,js,jsx} matche routes.js et routes-v2.js", () => {
+    mkdirSync(join(tmpDir, "app"), { recursive: true });
+    writeFileSync(join(tmpDir, "app", "routes.js"), "");
+    writeFileSync(join(tmpDir, "app", "routes-v2.js"), "");
+    writeFileSync(join(tmpDir, "app", "routes.ts"), "");
+    const files = walkFiles(tmpDir, ["app/routes*.{ts,tsx,js,jsx}"], []);
+    expect(files).toHaveLength(3);
+  });
+
+  it("*.ts matche un fichier sans préfixe avant .ts", () => {
+    expect(matchesAnyPattern("foo.ts", ["*.ts"])).toBe(true);
+  });
+});
+
+describe("matchesAnyPattern — wildcard * matche 0 caractères", () => {
+  it("routes*.js matche routes.js", () => {
+    expect(matchesAnyPattern("app/routes.js", ["app/routes*.js"])).toBe(true);
+  });
+
+  it("routes*.js matche routes-v2.js", () => {
+    expect(matchesAnyPattern("app/routes-v2.js", ["app/routes*.js"])).toBe(true);
+  });
+
+  it("routes*.js ne matche pas routes/index.js (pas de /)", () => {
+    expect(matchesAnyPattern("app/routes/index.js", ["app/routes*.js"])).toBe(false);
+  });
+});
+
 describe("globFiles", () => {
   it("équivaut à walkFiles avec un seul pattern", () => {
     writeFileSync(join(tmpDir, "test.ts"), "");

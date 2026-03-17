@@ -164,13 +164,13 @@ Le domaine est extrait du premier segment significatif du chemin source (`src/au
 ### Exemple `API_ROUTES.md`
 ```markdown
 ## /accounts
-| Méthode | Path | Body |
-|---------|------|------|
-| `GET` | `/api/accounts` | — |
-| `POST` | `/api/accounts` | { name, type, initialBalanceCents } |
-| `GET` | `/api/accounts/:id` | — |
-| `PUT` | `/api/accounts/:id` | { name, type, ... } |
-| `DELETE` | `/api/accounts/:id` | — |
+| Méthode | Path | Handler | Body |
+|---------|------|---------|------|
+| `GET` | `/api/accounts` | `accountController.getAll` | — |
+| `POST` | `/api/accounts` | `accountController.create` | { name, type, initialBalanceCents } |
+| `GET` | `/api/accounts/:id` | `accountController.getById` | — |
+| `PUT` | `/api/accounts/:id` | `accountController.update` | { name, type, ... } |
+| `DELETE` | `/api/accounts/:id` | `accountController.delete` | — |
 ```
 
 ---

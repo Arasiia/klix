@@ -15,7 +15,7 @@ function matchGlobSingle(pattern: string, filePath: string): boolean {
     .replace(/\?/g, "[^/]") // Glob ? → avant d'introduire des ? de quantificateur
     .replace(/\*\*\//g, "(.+/)?") // **/ → groupe optionnel
     .replace(/\*\*/g, ".+") // ** → n'importe quoi
-    .replace(/\*/g, "[^/]+"); // * → segment sans /
+    .replace(/\*/g, "[^/]*"); // * → segment sans / (0 ou plus)
   const regex = new RegExp(`^${escaped}$`);
   return regex.test(filePath) || regex.test(filePath.replace(/^\.\//, ""));
 }

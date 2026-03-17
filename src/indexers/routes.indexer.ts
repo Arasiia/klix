@@ -66,14 +66,15 @@ export function serializeRoutesSection(resource: string, routes: RouteEntry[], c
     `> ${routes.length} endpoints · resource: /${resource} · framework: ${framework}`,
     ``,
     `## /${resource}`,
-    `| Méthode | Path | Body |`,
-    `|---------|------|------|`,
+    `| Méthode | Path | Handler | Body |`,
+    `|---------|------|---------|------|`,
   ];
 
   const sorted = [...routes].sort((a, b) => methodOrder.indexOf(a.method) - methodOrder.indexOf(b.method));
   for (const r of sorted) {
+    const handler = r.handler ? `\`${r.handler}\`` : "—";
     const body = r.body ? `{ ${r.body} }` : "—";
-    lines.push(`| \`${r.method}\` | \`${r.path}\` | ${body} |`);
+    lines.push(`| \`${r.method}\` | \`${r.path}\` | ${handler} | ${body} |`);
   }
   lines.push(``);
 
@@ -110,14 +111,15 @@ export function runRoutesIndexer(rootDir: string, config: KlixConfig): string {
 
   for (const [resource, routes] of byResource) {
     lines.push(`## /${resource}`);
-    lines.push(`| Méthode | Path | Body |`);
-    lines.push(`|---------|------|------|`);
+    lines.push(`| Méthode | Path | Handler | Body |`);
+    lines.push(`|---------|------|---------|------|`);
 
     const sorted = routes.sort((a, b) => methodOrder.indexOf(a.method) - methodOrder.indexOf(b.method));
 
     for (const r of sorted) {
+      const handler = r.handler ? `\`${r.handler}\`` : "—";
       const body = r.body ? `{ ${r.body} }` : "—";
-      lines.push(`| \`${r.method}\` | \`${r.path}\` | ${body} |`);
+      lines.push(`| \`${r.method}\` | \`${r.path}\` | ${handler} | ${body} |`);
     }
     lines.push(``);
   }

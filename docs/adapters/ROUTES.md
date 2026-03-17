@@ -13,10 +13,11 @@ export interface RouteAdapter {
 }
 
 export interface RouteEntry {
-  method: string;   // "GET", "POST", "PUT", "PATCH", "DELETE"
-  path: string;     // path complet (apiPrefix + routePrefix + routePath)
-  body?: string;    // noms des champs du body séparés par ", "
-  file: string;     // chemin relatif du fichier source
+  method: string;    // "GET", "POST", "PUT", "PATCH", "DELETE", "ALL", "OPTIONS", "HEAD"
+  path: string;      // path complet (apiPrefix + routePrefix + routePath)
+  body?: string;     // noms des champs du body séparés par ", "
+  handler?: string;  // référence au handler (ex: "userController.getAll")
+  file: string;      // chemin relatif du fichier source
 }
 ```
 
@@ -113,3 +114,4 @@ export const monFrameworkAdapter: RouteAdapter = {
 |----|-----------|---------|
 | `elysia` | Elysia | `elysia.adapter.ts` |
 | `express` | Express | `express.adapter.ts` |
+| `koa` | Koa | `koa.adapter.ts` |

@@ -255,7 +255,7 @@ Avec `domainDepth: 2`, klix descend deux niveaux, ce qui est utile pour les proj
 
 ## Notes importantes
 
-- Mettre `language: "javascript"` ne change **pas** les patterns `include` — il faut aussi adapter les globs manuellement (remplacer `*.ts` par `*.js`)
+- `klix init` auto-détecte le langage et les projets mixtes TS/JS (tsconfig + majorité de fichiers `.js`) — les patterns générés incluent automatiquement les deux extensions
 - `klix init` auto-détecte les frameworks depuis `package.json` — rarement besoin de les configurer manuellement
 - En cas de config JSON invalide → fallback silencieux sur les défauts avec un warning dans la console
 

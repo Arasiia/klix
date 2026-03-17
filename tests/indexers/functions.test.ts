@@ -359,6 +359,38 @@ const arrow = (z: number) => z;`;
     expect(fns.find((f) => f.name === "named")?.kind).toBe("named");
     expect(fns.find((f) => f.name === "arrow")?.kind).toBe("named");
   });
+
+  it("extrait module.exports = function(app) {} (anonyme) → name = filename", () => {
+    const content = `module.exports = function(app) { app.use(router); }`;
+    const fns = extractAllFunctions(content, "/fake/setup.js", false, typescriptAdapter);
+    const fn = fns.find((f) => f.name === "setup");
+    expect(fn).toBeDefined();
+    expect(fn?.kind).toBe("cjs-export");
+  });
+
+  it("extrait module.exports = (app) => {} (anonyme arrow) → name = filename", () => {
+    const content = `module.exports = (app) => { app.use(router); }`;
+    const fns = extractAllFunctions(content, "/fake/setup.js", false, typescriptAdapter);
+    const fn = fns.find((f) => f.name === "setup");
+    expect(fn).toBeDefined();
+    expect(fn?.kind).toBe("cjs-export");
+  });
+
+  it("extrait module.exports = async function(req, res) {} → async = true", () => {
+    const content = `module.exports = async function(req, res) { return res.json({}); }`;
+    const fns = extractAllFunctions(content, "/fake/handler.js", false, typescriptAdapter);
+    const fn = fns.find((f) => f.name === "handler");
+    expect(fn).toBeDefined();
+    expect(fn?.isAsync).toBe(true);
+    expect(fn?.kind).toBe("cjs-export");
+  });
+
+  it("pas de doublon CJS anonyme si named CJS export existe", () => {
+    const content = `module.exports = function setup(app) { app.use(router); }`;
+    const fns = extractAllFunctions(content, "/fake/setup.js", false, typescriptAdapter);
+    const matches = fns.filter((f) => f.name === "setup");
+    expect(matches).toHaveLength(1);
+  });
 });
 
 describe("runFunctionsIndexer", () => {
